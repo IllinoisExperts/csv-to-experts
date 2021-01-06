@@ -1,15 +1,18 @@
 # ideals-to-experts
 IDEALS to Experts is a Python module that converts a CSV file of dc metadata records to valid XML for ingest by the Illinois Experts Research Information Management System.
 
+### Current Scope
+- Technical Reports
+
 ### Roadmap
-- Expand to include additional research output types (currently only supports technical reports).
+- Expand to include additional research output types.
 - Allow user input for certain global fields.
 - Add a way to insert NetID as personID.
 - Possibly rework with pandas.
 
 ### Known issues
-- "Contributor" field is currently ignored.
-- Listing an organization as an author, instead of group author, will cause problems.
+- "Contributor" field in dc metadata records is currently ignored.
+- Listing an organization as an author, instead of group author, will break the code.
 - Before running the script, encode or escape special characters in your CSV.  For example, insert encodings \&lt; for less than (<) and \&gt; for greater than (>).
 This ensures they will not break the XML during validation.
 

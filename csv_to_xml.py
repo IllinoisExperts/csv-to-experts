@@ -32,7 +32,7 @@ def load_preformatted_csv(csv_file: str) -> list:
 
     error_rows = []
     for row in allrows:
-        if len(row['date']) > 4:
+        if len(row['date']) == 0 or len(row['date']) > 10:
             error_rows.append(row['id'])
         else:
             continue
@@ -83,17 +83,72 @@ def load_dc_data(csv_file: str) -> pd.DataFrame:
     return df
 
 
-def write_author(authors: str) -> str:
+def reformat_author(authors: str) -> list:
     """
-    Given a string with a variable length of author names, split into first/last fields, insert into XML snippet, and return XML snippet
-    TODO: Return an error if the author value is blank ""
-    # TODO Need a way to give the person a unique ID - ideally NetID for internal persons. Right now using random ints.
+    Given a string with a variable length of author names, split into first/last fields.
+    Handle name suffixes.
+    TODO: Return an error with list of related IDs where organizations are listed instead of individuals.
 
-    :param authors: A string containing authors separated by || double pipes
+    :param authors: A string containing 1+ author(s) separated by || double pipes
+    :return: A list of tuples [('First', 'Last')]
+    >>> reformat_author('Lindsey, Timothy C.||Ocker, Alisa G.||Miller, Gary D.||Miller, Michelle C., Jr.||')
+    [('Timothy C.', 'Lindsey'), ('Alisa G.', 'Ocker'), ('Gary D.', 'Miller'), ('Michelle C.', 'Miller, Jr.')]
+    >>> reformat_author('')
+    ValueError: Author field appears to be blank.
+    """
+    reformatted_authors = []
+    # if len(authors) < 1:
+    #     # If the length of the full_author string is shorter than 1 character, skip. Prevent blank authors.
+    #     raise ValueError("An author is missing. XML will not validate. Check your CSV file.")
+    #else:
+    authors_by_full_name = authors.split("||")
+    for full_author in authors_by_full_name:
+        if len(full_author) < 1:
+            # If the length of the full_author string is shorter than 1 character, skip to prevent blanks in a list of otherwise valid authors.
+            continue
+        else:
+            split_author = full_author.split(", ")
+            if len(split_author) > 2:
+                # Deal with name suffixes
+                author_last = split_author[0] + ", " + split_author[2]
+                author_first = split_author[1]
+            elif len(split_author) == 2:
+                author_last = split_author[0]
+                author_first = split_author[1]
+            else:
+                # Deal with edge case if organizations are brought in as authors instead of group authors
+                author_last = split_author[0]
+                author_first = ""
+                print("NOTE: '{}' is not correctly formatted as 'Author Last Name, First Name'. XML will not validate. Check your CSV file.\n".format(split_author[0]))
+            reformatted_authors.append((author_first, author_last))
+    return reformatted_authors
+
+
+def validate_internal_authors(author_list, netid_list) -> list:
+    """
+    TODO
+    Need a way to give the person a unique ID - ideally NetID for internal persons. Right now using random ints.
+    Read in a list of "First","Last","netID" from Pure
+    Use fuzzy matching to compare with the names from IDEALS (author_list)
+    Where a match is found, grab netID; else, generate random ID. Add each consecutively to unique_id list.
+
+    :param author_list: A list of tuples with 1+ authors [('First','Last')]
+    :param netid_list: List of first, last, netID
+    :return: unique_id
+    """
+    pass
+
+
+def write_author(author_list) -> str:
+    """
+    Given authors, insert into XML snippet, and return XML snippet.
+    TODO: Add unique_id to function params, update random generator to insert values from unique_id list.
+
+    :param author_list: A list of tuples with 1+ authors [('First','Last')]
     :return: XML snippet, containing first and last names of authors
 
-    >>> write_author('Lindsey, Timothy C.||Ocker, Alisa G.||Miller, Gary D.||Miller, Michelle C., Jr.||')
-    '<v1:author>
+    >>> write_author([('Timothy C.', 'Lindsey'), ('Alisa G.', 'Ocker'), ('Gary D.', 'Miller'), ('Michelle C.', 'Miller, Jr.')])
+    <v1:author>
         <v1:role>author</v1:role>
         <v1:person id='person79358'>
             <v1:firstName>Timothy C.</v1:firstName>
@@ -120,49 +175,28 @@ def write_author(authors: str) -> str:
              <v1:firstName>Michelle C.</v1:firstName>
              <v1:lastName>Miller, Jr.</v1:lastName>
         </v1:person>
-    </v1:author>"
+    </v1:author>
     """
-    authors_by_full_name = authors.split("||")
     authors_xml_snippet = ""
-    for full_author in authors_by_full_name:
-        if len(full_author) < 1:
-            # If the length of the full_author string is shorter than 1 character, skip. Prevent blank authors.
-            continue
-        else:
-            split_author = full_author.split(", ")
-            if len(split_author) > 2:
-                # Deal with name suffixes
-                author_last = split_author[0] + ", " + split_author[2]
-                author_first = split_author[1]
-            elif len(split_author) == 2:
-                author_last = split_author[0]
-                author_first = split_author[1]
-            else:
-                # Deal with edge case if organizations are brought in as authors instead of group authors
-                author_last = split_author[0]
-                author_first = ""
-                print("NOTE: '{}' is not correctly formatted as 'Author Last Name, First Name'. XML will not validate. Check your CSV file.\n".format(split_author[0]))
-            # Add author to snippet
-            authors_xml_snippet += """
-            <v1:author>
-                <v1:role>author</v1:role>
-                <v1:person id='person""" + str(random.randrange(0, 100000)) + """'> 
-                    <v1:firstName>""" + author_first + """</v1:firstName>
-                    <v1:lastName>""" + author_last + """</v1:lastName>
-                </v1:person>
-            </v1:author>
-            """
+    # Add author to snippet
+    for author in author_list:
+        authors_xml_snippet += """
+        <v1:author>
+            <v1:role>author</v1:role>
+            <v1:person id='person""" + str(random.randrange(0, 100000)) + """'>
+                <v1:firstName>""" + author[0] + """</v1:firstName>
+                <v1:lastName>""" + author[1] + """</v1:lastName>
+            </v1:person>
+        </v1:author>
+        """
     return authors_xml_snippet
 
 
 def write_group_author(group_authors: str) -> str:
     """
     Given a string with a variable length of group author, insert into XML snippet, and return XML snippet
-    :param group_authors: A string containing group authors separated by || double pipes
+    :param group_authors: A string containing 1+ group authors, with multiple authors separated by || double pipes
     :return: XML snippet with group authors
-
-    :param group_authors:
-    :return:
     >>> write_group_author("Illinois Institute of Technology||Illinois Waste Management and Research Center")
     '<v1:author>
         <v1:role>author</v1:role>
@@ -189,7 +223,7 @@ def write_keywords(all_keywords: str) -> str:
     """
     Given a string with a variable length of subject keywords, insert into XML snippet, and return XML snippet
 
-    :param all_keywords: A string containing all subject keywords separated by || double pipes
+    :param all_keywords: A string containing 1+ subject keywords separated by || double pipes
     :return: An XML snippet for subject keywords
     >>> write_keywords("Water pollution -- Illinois||Illinois River||Metals -- Water pollution -- Illinois||Polycyclic aromatic hydrocarbons -- Water pollution -- Illinois")
     '<v3:freeKeyword>
@@ -218,9 +252,10 @@ def write_keywords(all_keywords: str) -> str:
 
 def write_series(all_series) -> str:
     """
+    Write series information to XML snippet
 
-    :param all_series:
-    :return:
+    :param all_series: A string containing 1+ series separated by || double pipes. Series number information, if provided, is separated by ; colon.
+    :return: XML snippet containing series information.
     >>> write_series("Hazardous Waste Research and Information Center Research Report Series; RR-054||Illinois State Geological Survey Environmental Geology; 137")
     '<v1:serie>
         <v1:name>Hazardous Waste Research and Information Center Research Report Series</v1:name>
@@ -256,10 +291,10 @@ def write_xml(csv_data: list, managing_unit: str, organization_name: str, url_te
     Print data into an XML file, call helper functions depending on what columns are included in the data.
 
     :param csv_data: List of dictionaries. Each dict contains 1 research output.
-    :param managing_unit: A string. Value for the organizational owner can be found in Pure portal. Internal to Pure system.
-    :param organization_name: A string. Appears as the research's affiliated unit on the portal.
-    :param url_text: A string. Appears on portal as the description of a URL, e.g. "IDEALS Repository Link".
-    :param outfile_name:
+    :param managing_unit: Value for the organizational owner can be found in Pure portal. Internal to Pure system.
+    :param organization_name: Appears as the research's affiliated unit on the portal.
+    :param url_text: Appears on portal as the description of a URL, e.g. "IDEALS Repository Link".
+    :param outfile_name: The name specified for the XML outfile.
     :return: None
     """
     total_research_outputs = len(csv_data)
@@ -277,7 +312,7 @@ def write_xml(csv_data: list, managing_unit: str, organization_name: str, url_te
     # NOTE: You must download these namespaces from the Pure portal (Administrator > Bulk import). Link them to your XML before validating.
     print('<?xml version="1.0" encoding="utf-8"?>', file=outfile)
     print('<v1:publications xmlns:v3="v3.commons.pure.atira.dk" xmlns:v1="v1.publication-import.base-uk.pure.atira.dk">',
-        file=outfile)
+          file=outfile)
 
     # Loop through all rows in the spreadsheet.
     # Begin printing each CSV row into XML.
@@ -330,7 +365,8 @@ def write_xml(csv_data: list, managing_unit: str, organization_name: str, url_te
 
         # Persons (authors)
         print('<v1:persons>', file=outfile)
-        print(write_author(row['creator']), file=outfile)
+        authors = reformat_author(row['creator'])
+        print(write_author(authors), file=outfile)
 
         # Persons (group authors, organizational authors)
         print(write_group_author(row['groupauthor']), file=outfile)
@@ -438,7 +474,7 @@ def write_xml(csv_data: list, managing_unit: str, organization_name: str, url_te
 
 if __name__ == '__main__':
     # Load the CSV file
-    incoming_metadata = load_preformatted_csv("dummy_technical_report_data.csv")
+    incoming_metadata = load_preformatted_csv("../ExpertsSCP/refactored_code/dummy_technical_report_data.csv")
 
     # Enter managing unit, organization name, and URL variables
     # TODO: Allow user to input the values for these variables
@@ -449,7 +485,6 @@ if __name__ == '__main__':
 # Print the XML
     outgoing_xml = write_xml(incoming_metadata, mgr_unit, org_name, url, "test_outfile.xml")
 
-
 # Create and inspect the dataframe returned
 #     dc_metadata = load_dc_data("2142-812-dc.csv")
 #     print(dc_metadata['creator'])
@@ -458,5 +493,3 @@ if __name__ == '__main__':
 
 # Search by ID (row index)
     # print(incoming_metadata[incoming_metadata.index == 46370])
-
-

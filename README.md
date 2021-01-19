@@ -1,14 +1,16 @@
 # ideals-to-experts
-IDEALS to Experts is a Python module that converts a CSV file of dc metadata records to valid XML for ingest by the Illinois Experts Research Information Management System.
+IDEALS to Experts is a Python module that converts a CSV file of either Zotero bibliographic metadata or dc metadata records to valid XML for ingest by the Illinois Experts Research Information Management System.
 
 ### Current Scope
-- Technical Reports
+- Technical Report
+- Book
+- Chapter in Book
+- Journal Article
+- Conference Proceeding
 
 ### Roadmap
-- Expand to include additional research output types.
 - Allow user input for certain global fields.
-- Add a way to insert NetID as personID.
-- Possibly rework with pandas.
+- Fine tune the Internal Person matching. 
 
 ### Known issues
 - "Contributor" field in dc metadata records is currently ignored.
@@ -17,7 +19,7 @@ IDEALS to Experts is a Python module that converts a CSV file of dc metadata rec
 This ensures they will not break the XML during validation.
 
 ### How to use
-- Prepare a CSV file. See the template for required headers.  
+- Export a CSV of citations from Zotero. Alternately, prepare a CSV file: See the template for required headers.  
 - Afterwards, the XML outfile must be validated. 
 - Then it is ready to be bulk uploaded in the Pure portal.
 

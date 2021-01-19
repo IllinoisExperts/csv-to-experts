@@ -1,5 +1,5 @@
-# ideals-to-experts
-IDEALS to Experts is a Python module that converts a CSV file of either Zotero bibliographic metadata or dc metadata records to valid XML for ingest by the Illinois Experts Research Information Management System.
+# csv-to-experts
+CSV to Experts is a Python module that converts a CSV file of either Zotero bibliographic metadata or dc metadata records to valid XML for ingest by the Illinois Experts Research Information Management System.
 
 ### Current Scope
 - Technical Report

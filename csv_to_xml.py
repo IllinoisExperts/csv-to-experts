@@ -10,6 +10,7 @@ Requirements:
 import csv
 import numpy as np
 import pandas as pd
+import re
 from fuzzywuzzy import fuzz
 import random
 
@@ -55,13 +56,15 @@ def load_zotero_csv(csv_file: str) -> list:
     :param csv_file: A string pointing to the actual file
     :return: A list of dictionaries, where each row of data is a dictionary containing header:value pairs
     """
-    df = pd.read_csv(csv_file, usecols=['Key','Item Type','Publication Year','Author', 'Title', 'Publication Title', 'ISBN', 'ISSN', 'DOI', 'Url', 'Abstract Note', 'Date', 'Pages', 'Num Pages', 'Issue', 'Volume', 'Series', 'Series Number', 'Publisher', 'Place', 'Rights', 'Notes', 'Automatic Tags', 'Editor'],
-                     dtype={'Publication Year': 'Int64','Num Pages':'Int64'}, encoding='utf-8')
-    columns_mapper = {'Key': 'id', 'Item Type': 'type', 'Author': 'creator', 'Title': 'title', 'Publication Title': 'journal', 'DOI': 'doi', 'Url': 'url', 'Abstract Note': 'abstract', 'Date': 'date', 'Series': 'relation', 'Publisher': 'publisher', 'Place': 'place of publication', 'Automatic Tags': 'subject', 'Pages':'Pages Range', 'Num Pages':'pages'}
+    df = pd.read_csv(csv_file, usecols=['Key','Item Type','Publication Year','Author', 'Title', 'Publication Title', 'ISBN', 'ISSN', 'DOI', 'Url', 'Abstract Note', 'Date', 'Pages', 'Num Pages', 'Issue', 'Volume', 'Series', 'Series Number', 'Publisher', 'Place', 'Rights', 'Notes', 'Manual Tags', 'Automatic Tags', 'Editor', 'Edition'],
+                     dtype={'Publication Year': 'Int64','Num Pages':'Int64','Volume':'object'}, encoding='utf-8')
+    columns_mapper = {'Key': 'id', 'Item Type': 'type', 'Author': 'creator', 'Publication Title': 'journal', 'Abstract Note': 'abstract', 'Series': 'relation', 'Place': 'place of publication', 'Pages': 'Pages Range', 'Num Pages':'pages'}
     df = df.rename(columns=columns_mapper)
     df = df.replace(np.nan, "", regex=True)
+    df['subject'] = df['Manual Tags'] + "\n" + df['Automatic Tags']
     df['notes'] = df['Notes'].astype(str) + "\n" + df['Rights'].astype(str)
-    df = df.drop(columns=['Notes', 'Rights'])
+    df = df.drop(columns=['Notes', 'Rights', 'Manual Tags', 'Automatic Tags'])
+    df.columns = df.columns.str.lower()
     allrows = df.to_dict(orient='records')
     return allrows
 
@@ -115,7 +118,7 @@ def reformat_author(authors: str) -> list:
 
 def validate_internal_authors(author_list: list, internal_persons: str, detailed_output=False) -> list:
     """
-    TODO: TEST THIS FUNCTION THOROUGHLY
+    TODO: Print a report to console, comparing AUTH NAME, MATCHED NAME, PUB ID
     Read in list of 1+ reformatted authors (scope: 1 research output) and Internal Persons file.
 
     For each author in author_list,
@@ -149,7 +152,7 @@ def validate_internal_authors(author_list: list, internal_persons: str, detailed
                 break
             else:
                 ratio = fuzz.ratio(string, correct_string)
-                if ratio > 74:
+                if ratio > 79:
                     ratios.append((string, ratio))
         if len(ratios) == 1:
             # Look up ratios[0] in df, return the ID of that match using .loc
@@ -170,7 +173,6 @@ def validate_internal_authors(author_list: list, internal_persons: str, detailed
             # Use position within list to get back to the string, look up string in df to return ID using .loc
             select_row = df.loc[df["2 Last, first name"] == ratios[0][0]]
             auth_id = int(select_row["18 ID"])
-        # TODO: Check with Mark. Upload the author name as listed in CSV, or as found in Pure? (ID will ensure they match either way).
         validated_authors.append([auth_id, author])
     return validated_authors
 
@@ -246,24 +248,30 @@ def write_keywords(all_keywords: str) -> str:
         <v3:text>Polycyclic aromatic hydrocarbons -- Water pollution -- Illinois</v3:text>
     </v3:freeKeyword>'
     """
+    # Handle list of keywords separated by ; rather than ||
+    if ";" in all_keywords and "||" not in all_keywords:
+        all_keywords = re.sub(";", "||", all_keywords)
+
     keywords = all_keywords.split("||")
     keywords_xml_snippet = ""
     if all_keywords != "":
         for keyword in keywords:
             keywords_xml_snippet += """
     <v3:freeKeyword>
-        <v3:text>""" + keyword + """</v3:text>
+        <v3:text>""" + keyword.strip() + """</v3:text>
     </v3:freeKeyword>"""
     return keywords_xml_snippet
 
 
-def write_series(all_series: str) -> str:
+def write_series(all_series: str, number, issn) -> str:
     """
     Write series information to XML snippet
 
     :param all_series: A string containing 1+ series separated by || double pipes. Series number information, if provided, is separated by ; colon.
+    :param number:
+    :param issn:
     :return: XML snippet containing series information.
-    >>> write_series("Hazardous Waste Research and Information Center Research Report Series; RR-054||Illinois State Geological Survey Environmental Geology; 137")
+    >>> write_series("Hazardous Waste Research and Information Center Research Report Series; RR-054||Illinois State Geological Survey Environmental Geology; 137", np.nan, np.nan)
     '<v1:serie>
         <v1:name>Hazardous Waste Research and Information Center Research Report Series</v1:name>
         <v1:number>RR-054</v1:number>
@@ -272,23 +280,48 @@ def write_series(all_series: str) -> str:
         <v1:name>Illinois State Geological Survey Environmental Geology</v1:name>
         <v1:number>137</v1:number>
     </v1:serie>'
+    >>> write_series("Illinois Natural History Survey Manual",15,np.nan)
+    >>> write_series("Illinois Natural History Survey Manual",np.nan,"12345678") #doctests: +NORMALIZE_WHITESPACE
+    '\n            <v1:serie>\n                <v1:name>Illinois Natural History Survey Manual</v1:name><v1:printIssns>\n        <v1:Issn>12345678</v1:Issn>\n        </v1:printIssns>'
     """
+    if "||" in all_series:
+        series = all_series.split("||")  # Series is a list of serie
+#        authors_by_full_name = authors.split("||")
+    else:
+        series = [all_series]
+
+    # Set nans where fields are blank
+    if number == "":
+        number = np.nan
+    if issn == "":
+        issn = np.nan
+
     series_xml_snippet = ""
-    series = all_series.split("||")     # Series is a list of serie
-    for one_serie in series:
-        if ";" in one_serie:
-            split_serie = one_serie.split(";")
-            serie_name = split_serie[0]
-            serie_number = split_serie[1]
-        else:
-            serie_name = str(one_serie)
-            serie_number = ""
-        series_xml_snippet += """
-        <v1:serie>
-            <v1:name>""" + serie_name.strip() + """</v1:name>
-            <v1:number>""" + serie_number.strip() + """</v1:number>
-        </v1:serie>
-        """
+    if number is np.nan and issn is np.nan:
+        for one_serie in series:
+            if ";" in one_serie:
+                split_serie = one_serie.split(";")
+                serie_name = split_serie[0]
+                serie_number = split_serie[1]
+            else:
+                serie_name = str(one_serie)
+                serie_number = ""
+            series_xml_snippet += """<v1:serie>
+                <v1:name>""" + serie_name.strip() + """</v1:name>
+                <v1:number>""" + serie_number.strip() + """</v1:number>
+            </v1:serie>
+            """
+    else:
+        for one_serie in series:
+            series_xml_snippet += """<v1:serie>
+                <v1:name>""" + one_serie.strip() + """</v1:name>"""
+            if number is not np.nan:
+                series_xml_snippet += """
+                <v1:number>""" + str(number).strip() + """</v1:number>"""
+            if issn is not np.nan:
+                series_xml_snippet += write_barcodes(issn, 'issn')
+            series_xml_snippet += """
+            </v1:serie>"""
     return series_xml_snippet
 
 
@@ -325,7 +358,7 @@ def write_barcodes(all_barcodes: str, barcode_type: str) -> str:
         raise ValueError("Barcode type not found.")
     for barcode in barcodes:
         barcode_xml_snippet += """
-        <v1:""" + formatted_bct + """>""" + barcode.strip() + """</v1:""" + formatted_bct + """>
+        <v1:""" + formatted_bct.lower() + """>""" + barcode.strip() + """</v1:""" + formatted_bct.lower() + """>
         """
     barcode_xml_snippet += """</v1:print""" + formatted_bct + """s>"""
     return barcode_xml_snippet
@@ -364,19 +397,19 @@ def set_research_output_type(research_id, type_value: str) -> dict:
     if 'book' in type_value.lower():
         research_output_type['type'] = 'book'
         research_output_type['subType'] = 'book'
-    elif 'technical' or 'report' in type_value.lower():
+    elif 'technical' in type_value.lower() or 'report' in type_value.lower():
         research_output_type['type'] = 'book'
         research_output_type['subType'] = 'technical_report'
     elif 'booksection' in type_value.lower():
         research_output_type['type'] = 'chapterInBook'
         research_output_type['subType'] = 'chapter'
-    elif 'other' and 'conference' in type_value.lower():
+    elif 'other' in type_value.lower() and 'conference' in type_value.lower():
         research_output_type['type'] = 'contributionToConference'
         research_output_type['subType'] = 'other'
-    elif 'conference' or 'conferencepaper' or 'proceeding' in type_value.lower():
+    elif 'conference' in type_value.lower() or 'conferencepaper' in type_value.lower() or 'proceeding' in type_value.lower():
         research_output_type['type'] = 'contributionToConference'
         research_output_type['subType'] = 'paper'
-    elif 'journal' or 'article' or 'journalarticle' in type_value.lower():
+    elif 'journal' in type_value.lower() or 'article' in type_value.lower() or 'journalarticle' in type_value.lower():
         research_output_type['type'] = 'contributionToJournal'
         research_output_type['subType'] = 'article'
     elif 'presentation' in type_value.lower():
@@ -400,10 +433,12 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
     :return: None
     """
     total_research_outputs = len(csv_data)
+
     # Collect all headers included in this CSV into a list for verifying contents of this specific CSV
     csv_headers = []
     for row in csv_data:
         for key in row.keys():
+            key = key.lower()
             if key not in csv_headers:
                 csv_headers.append(key)
 
@@ -432,7 +467,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
 
         # Peer review status is hard-coded depending on the research output type.
         if ro_type['subType'] == 'article':
-            print('<v1:peerReviewed>True</v1:peerReviewed>', file=outfile)
+            print('<v1:peerReviewed>true</v1:peerReviewed>', file=outfile)
         else:
             print('<v1:peerReviewed>false</v1:peerReviewed>', file=outfile)
 
@@ -451,6 +486,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             year = date[:4]
         print('<v3:year>' + year + '</v3:year>', file=outfile)
         if len(date) > 4:
+            # EXPECTED DATE FORMAT: YYYY-MM-DD
             full_date = date.split("-")
             month = full_date[1]
             print('<v3:month>' + month + '</v3:month>', file=outfile)
@@ -467,15 +503,24 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
 
         # Research output title
         print('<v1:title>', file=outfile)
-        print('<v3:text lang="en" country="US"><![CDATA[' + row['title'] + ']]></v3:text>', file=outfile)
+        titles = []
+        if ":" in row['title']:
+            titles = row['title'].split(":")
+            print('<v3:text lang="en" country="US"><![CDATA[' + titles[0].strip() + ']]></v3:text>', file=outfile)
+        else:
+            print('<v3:text lang="en" country="US"><![CDATA[' + row['title'] + ']]></v3:text>', file=outfile)
         print('</v1:title>', file=outfile)
-        if 'subtitle' in csv_headers:
+
+        # Research output subtitle
+        if len(titles) > 1:
+            print('<v1:subTitle>', file=outfile)
+            print('<v3:text lang="en" country="US"><![CDATA[' + titles[1].strip() + ']]></v3:text>', file=outfile)
+            print('</v1:subTitle>', file=outfile)
+        elif 'subtitle' in csv_headers:
             if row['subtitle'] != "":
                 print('<v1:subTitle>', file=outfile)
-                print('<v3:text lang="en" country="US">' + row['subtitle'] + '</v3:text>', file=outfile)
+                print('<v3:text lang="en" country="US"><![CDATA[' + row['subtitle'] + ']]></v3:text>', file=outfile)
                 print('</v1:subTitle>', file=outfile)
-            else:
-                continue
 
         # Abstract
         if row['abstract'] != "":
@@ -563,26 +608,26 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
         # IF ARTICLE SUBTYPE
         if ro_type['subType'] == 'article':
             # PAGES RANGE e.g. "10-25"
-            if 'Pages Range' in csv_headers:
-                if row['Pages Range'] != '':
-                    print('<v1:pages>' + row['Pages Range'] + '</v1:pages>', file=outfile)
+            if 'pages range' in csv_headers:
+                if row['pages range'] != '':
+                    print('<v1:pages>' + row['pages range'] + '</v1:pages>', file=outfile)
             # NUMBER OF PAGES
             if 'pages' in csv_headers:
                 if row['pages'] != "":
                     print('<v1:numberOfPages>' + row['pages'] + '</v1:numberOfPages>', file=outfile)
             # JOURNAL INFO
-            if 'Issue' in csv_headers:
-                if row['Issue'] != '':
-                    print('<v1:journalNumber>' + row['Issue'] + '</v1:journalNumber>', file=outfile)
-            if 'Volume' in csv_headers:
-                if row['Volume'] != '':
-                    print('<v1:journalVolume>' + row['Volume'] + '</v1:journalVolume>', file=outfile)
+            if 'issue' in csv_headers:
+                if row['issue'] != '':
+                    print('<v1:journalNumber>' + row['issue'] + '</v1:journalNumber>', file=outfile)
+            if 'volume' in csv_headers:
+                if row['volume'] != '':
+                    print('<v1:journalVolume>' + row['volume'] + '</v1:journalVolume>', file=outfile)
             print('<v1:journal>', file=outfile)
             print('<v1:title>' + row['journal'] + '</v1:title>', file=outfile)
             # JOURNAL ISSN
             if 'issn' in csv_headers:
                 if row['issn'] != '':
-                    print(write_barcodes(row['issn'],'issn'), file=outfile)
+                    print(write_barcodes(row['issn'], 'issn'), file=outfile)
             print('</v1:journal>', file=outfile)
 
         # Books, technical reports, book chapters
@@ -596,21 +641,34 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             if row['place of publication'] != "":
                 print('''<v1:placeOfPublication>''' + row['place of publication'] + '''</v1:placeOfPublication>''', file=outfile)
 
+            # Book edition
+            if 'edition' in csv_headers:
+                if row['edition'] != '':
+                    print('<v1:edition>' + row['edition'] + '</v1:edition>', file=outfile)
+
+            # Volume
+            if 'volume' in csv_headers:
+                if row['volume'] != '':
+                    print('<v1:volume>' + row['volume'] + '</v1:volume>', file=outfile)
+
             # ISBN
             if 'isbn' in csv_headers:
                 if row['isbn'] != '':
-                    print(write_barcodes(row['isbn'],'isbn'), file=outfile)
+                    print(write_barcodes(row['isbn'], 'isbn'), file=outfile)
 
-            # SERIES - TECHNICAL REPORTS
-            if ro_type['subType'] == 'technical_report':
-                if 'relation' in csv_headers:
-                    if row['relation'] != "":
-                        print('''<v1:series>''', file=outfile)
-                        print(write_series(row['relation']), file=outfile)
-                        if 'issn' in csv_headers:
-                            if row['issn'] != '':
-                                print(write_barcodes(row['issn'], 'issn'), file=outfile)
-                        print('''</v1:series>''', file=outfile)
+            # BOOK/REPORT SERIES
+            if 'relation' in csv_headers:
+                if row['relation'] != "":
+                    print('''<v1:series>''', file=outfile)
+                    if 'series number' in csv_headers and 'issn' in csv_headers:
+                        print(write_series(row['relation'], row['series number'], row['issn']), file=outfile)
+                    elif 'series number' in csv_headers:
+                        print(write_series(row['relation'], row['series number'], np.nan), file=outfile)
+                    elif 'issn' in csv_headers:
+                        print(write_series(row['relation'], np.nan, row['issn']), file=outfile)
+                    else:
+                        print(write_series(row['relation'], np.nan, np.nan), file=outfile)
+                    print('''</v1:series>''', file=outfile)
 
             # HOST PUBLICATION TITLE - CH. IN BOOK
             elif ro_type['subType'] == 'chapter':
@@ -633,14 +691,12 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             #               </v1:editor>''',file=outfile)
             #         print('</v1:editors>', file=outfile)
 
+            # CHAPTER IN BOOK - SERIES APPEARS BELOW EDITOR
             if ro_type['subType'] == 'chapter':
                 if 'relation' in csv_headers:
                     if row['relation'] != "":
                         print('''<v1:series>''', file=outfile)
                         print(write_series(row['relation']), file=outfile)
-                        if 'issn' in csv_headers:
-                            if row['issn'] != '':
-                                print(write_barcodes(row['issn'], 'issn'), file=outfile)
                         print('''</v1:series>''', file=outfile)
 
         # Publication type - Closing tag
@@ -659,7 +715,7 @@ if __name__ == '__main__':
     file_type = str(input('Enter a Z for Zotero file or D for DublinCore file. '))
     if file_type.lower() in ['z', 'zotero']:
         # Load the Zotero CSV file
-        filename = '../ExpertsSCP/PRIBooks.csv'
+        filename = '../ExpertsSCP/PRI/2021/PRIConferencePapers.csv'
         print('\nNow processing ' + filename + '...\n')
         incoming_metadata = load_zotero_csv(filename)
     elif file_type.lower() in ['d', 'dublincore', 'dublin core']:
@@ -670,14 +726,15 @@ if __name__ == '__main__':
     else:
         raise ValueError('Invalid input.')
 
+    # TODO: Allow user to input the values for the following variables
     # Load the names and IDs from Pure of internal Pure persons
-    researchers = "../ExpertsSCP/Pure persons - 11921.xls"
-
+    researchers = "../ExpertsSCP/PRI/PRI_faculty_in_pure.xls"
     # Enter managing unit, organization name, and URL variables
-    # TODO: Allow user to input the values for these variables
     mgr_unit = "123"
-    org_name = "Illinois Sustainable Technology Center"
-    url = "IDEALS repository link"
+    org_name = "Prairie Research Institute"
+    url = ""
+    # Name the outfile
+    outfile = "PRI_conf_2021_79ratio.xml"
 
     # Print the XML
-    outgoing_xml = write_xml(incoming_metadata, researchers, mgr_unit, org_name, url, "PRI_test_outfile.xml")
+    outgoing_xml = write_xml(incoming_metadata, researchers, mgr_unit, org_name, url, outfile)

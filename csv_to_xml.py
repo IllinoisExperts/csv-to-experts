@@ -2,7 +2,26 @@
 Converts CSV files with research output metadata into XML files prepared for bulk upload in Pure Research Information Management System.
 Compatible with Pure version 5.19.3.
 
-Requirements:
+INPUTS:
+- CSV file, with headers either matching template (choose 'd') or Zotero export format ('z').
+
+STEPS:
+1. Set the source file.
+2. Set the destination file.
+3. Confirm the Internal Persons file (against which authors will be matched).
+4. Confirm the Managing Unit and Organization Name to be applied to all records.
+5. Optionally: Change the default fuzzy matching ratio.
+6. Optionally: Output validation tools.
+6. Run the program.
+
+OUTPUTS:
+- XML file
+- Optional validation tools (when detailed_output=True):
+--- external_persons.txt, a list of authors from CSV file with no match in the Internal Persons file
+--- group_authors.txt, a list of authors with irregular formatting, listed as groupAuthors in XML
+--- internal_person_matches.txt, a list of authors from CSV with their Internal Person match(es)
+
+REQUIREMENTS:
 - fuzzywuzzy package
 - python-Levenshtein package
 - Microsoft Visual C++ tools
@@ -50,15 +69,20 @@ def load_preformatted_csv(csv_file: str) -> list:
 
 def load_zotero_csv(csv_file: str) -> list:
     """
-    Load an exported CSV from Zotero.
+    Load a CSV which has been exported from Zotero.
     See Zotero-Experts-crosswalk.csv for data mapping.
 
     :param csv_file: A string pointing to the actual file
     :return: A list of dictionaries, where each row of data is a dictionary containing header:value pairs
     """
-    df = pd.read_csv(csv_file, usecols=['Key','Item Type','Publication Year','Author', 'Title', 'Publication Title', 'ISBN', 'ISSN', 'DOI', 'Url', 'Abstract Note', 'Date', 'Pages', 'Num Pages', 'Issue', 'Volume', 'Series', 'Series Number', 'Publisher', 'Place', 'Rights', 'Notes', 'Manual Tags', 'Automatic Tags', 'Editor', 'Edition'],
+    df = pd.read_csv(csv_file, usecols=['Key','Item Type','Publication Year','Author', 'Title', 'Publication Title', 'ISBN',
+                                        'ISSN', 'DOI', 'Url', 'Abstract Note', 'Date', 'Pages', 'Num Pages', 'Issue', 'Volume',
+                                        'Series', 'Series Number', 'Publisher', 'Place', 'Rights', 'Notes', 'Manual Tags',
+                                        'Automatic Tags', 'Editor', 'Edition'],
                      dtype={'Publication Year': 'Int64','Num Pages':'Int64','Volume':'object'}, encoding='utf-8')
-    columns_mapper = {'Key': 'id', 'Item Type': 'type', 'Author': 'creator', 'Publication Title': 'journal', 'Abstract Note': 'abstract', 'Series': 'relation', 'Place': 'place of publication', 'Pages': 'Pages Range', 'Num Pages':'pages'}
+    columns_mapper = {'Key': 'id', 'Item Type': 'type', 'Author': 'creator', 'Publication Title': 'journal',
+                      'Abstract Note': 'abstract', 'Series': 'relation', 'Place': 'place of publication',
+                      'Pages': 'Pages Range', 'Num Pages':'pages'}
     df = df.rename(columns=columns_mapper)
     df = df.replace(np.nan, "", regex=True)
     df['subject'] = df['Manual Tags'] + "\n" + df['Automatic Tags']
@@ -69,34 +93,48 @@ def load_zotero_csv(csv_file: str) -> list:
     return allrows
 
 
-def reformat_author(authors: str) -> list:
+def reformat_author(research_id, authors: str) -> tuple:
     """
-    Given a string with a variable length of author names, split into first/last fields. Handle name suffixes.
-    Returns an error with list of related IDs where organizations are listed instead of individuals.
+    Given a string with a variable length of author/editor names, split into first/last fields. Handles name suffixes.
+    Returns a list of research IDs where organizations are listed instead of individuals.
+    Raises ValueError where author field is blank.
 
-    :param authors: A string containing 1+ author(s) separated by || double pipes
-    :return: A list of tuples [('First', 'Last')]
-    >>> reformat_author('Zabini, Blaise C.||Vance, Emmeline G.||Podmore, Sturgis D.||Crouch, Barty C., Jr.||')
-    [('Blaise C.', 'Zabini'), ('Emmeline G.', 'Vance'), ('Sturgis D.', 'Podmore'), ('Barty C.', 'Crouch, Jr.')]
-    >>> reformat_author('')
-    ValueError: Author field is blank.
-    >>> reformat_author('Johnson, Angelina; Delacour, Gabrielle G.; Goldstein, Anthony')
-    [('Angelina', 'Johnson'), ('Gabrielle G.', 'Delacour'), ('Anthony', 'Goldstein')]
-    >>> reformat_author('Jorkins, Bertha B.')
-    [('Bertha B.', 'Jorkins')]
+    :param research_id: ID of research output
+    :param authors: A string containing 1+ author(s) separated by || double pipes or ; colon
+    :return: A tuple of 1) list of tuples [('First', 'Last')] and 2) list of tuples [('group author', research ID)]
+
+    >>> reformat_author(123, 'Zabini, Blaise C.||Vance, Emmeline G.||Podmore, Sturgis D.||Crouch, Barty C., Jr.||')
+    ([('Blaise C.', 'Zabini'), ('Emmeline G.', 'Vance'), ('Sturgis D.', 'Podmore'), ('Barty C.', 'Crouch, Jr.')], [])
+    >>> reformat_author(123, 'Johnson, Angelina; Delacour, Gabrielle G.; Goldstein, Anthony')
+    ([('Angelina', 'Johnson'), ('Gabrielle G.', 'Delacour'), ('Anthony', 'Goldstein')], [])
+    >>> reformat_author(123, 'Jorkins, Bertha B.')
+    ([('Bertha B.', 'Jorkins')], [])
+    >>> reformat_author(123, 'Hogwarts School')
+    ([('', 'Hogwarts School')], [('Hogwarts School', 123)])
+    >>> reformat_author(123, '')
+    ValueError: Author field is blank. Fix in the CSV file before proceeding.
     """
+    # Set up variables to return
     reformatted_authors = []
+    groups = []
+    # Separate multiple authors
     if "||" in authors:
         authors_by_full_name = authors.split("||")
     elif ";" in authors:
         authors_by_full_name = authors.split("; ")
     elif len(authors) < 1:
-        raise ValueError("Author field is blank.")
+        group_auth_decision = str(input('An author field is blank. Substitute a group author? Enter Y or N. '))
+        if group_auth_decision.lower() in ['y', 'yes']:
+            group_auth = str(input('Enter group author name: '))
+            authors_by_full_name = [group_auth]
+        else:
+            raise ValueError("Author field is blank. Fix in the CSV file before proceeding.")
     else:
         authors_by_full_name = [authors]
+    # Split authors into first and last names
     for full_author in authors_by_full_name:
         if len(full_author) < 1:
-            # If the length of the full_author string is shorter than 1 character, skip to prevent blanks in a list of otherwise valid authors.
+            # If the length of the full_author string is shorter than 1 character, skip to prevent blanks in a list of otherwise valid authors
             continue
         else:
             split_author = full_author.split(", ")
@@ -109,39 +147,45 @@ def reformat_author(authors: str) -> list:
                 author_first = split_author[1]
             else:
                 # Deal with edge case if organizations are brought in as authors instead of group authors
-                author_last = split_author[0]
+                author_last = full_author
                 author_first = ""
-                print("\nNOTE: '{}' is not correctly formatted as 'Author Last Name, First Name'. XML will not validate. Check your CSV file.\n".format(split_author[0]))
+                # Save groups for review in detailed output files
+                groups.append((split_author[0], research_id))
             reformatted_authors.append((author_first, author_last))
-    return reformatted_authors
+    return reformatted_authors, groups
 
 
-def validate_internal_authors(author_list: list, internal_persons: str, detailed_output=False) -> list:
+def validate_internal_authors(author_list: list, internal_persons: str, custom_ratio: int) -> tuple:
     """
-    TODO: Print a report to console, comparing AUTH NAME, MATCHED NAME, PUB ID
     Read in list of 1+ reformatted authors (scope: 1 research output) and Internal Persons file.
-
     For each author in author_list,
         Use fuzzy matching to compare author with all persons in Internal Persons.
-        Where a match is found, grab PureID; else, generate random ID.
-
+        Where a match is found, grab PureID and first Unit Affiliation; else, generate random ID and unit = np.nan.
     Add each author consecutively to new validated_authors list.
+
+    NOTE: Beware of false matches where author names are very similar but represent different people. Set detailed_output=True for report.
 
     :param author_list: A list of tuples with 1+ authors [('First','Last')]
     :param internal_persons: Str reference to Pure - Internal Persons file against which to validate the list of authors in csv_data.
-    :param detailed_output: Bool, default False. If true, print to console when choosing between multiple matched persons.
-    :return: validated_authors as [[auth_id, (First, Last)]]
-    >>> validate_internal_authors([('Angelina', 'Johnson'), ('Gabrielle G.', 'Delacour'), ('Anthony', 'Goldstein')], "../ExpertsSCP/Pure persons - 11921.xls") #doctest: +ELLIPSIS
-    [[..., ('Angelina', 'Johnson')], ['...', ('Gabrielle G.', 'Delacour')], ['...', ('Anthony', 'Goldstein')]]
-    """
-    validated_authors = []
+    :param custom_ratio: 79 by default. Increase for a more strict matching test. Decrease to match more broadly.
+    :return: validated_authors as [[auth_id, (First, Last)]], external_authors as set(), matches_log as list()
 
+    >>> validate_internal_authors([('Gabrielle G.', 'Delacour'), ('Anthony', 'Goldstein')], "sample_internal_persons.xlsx") #doctest: +ELLIPSIS
+     ([[403788, ('Gabrielle G.', 'Delacour'), 'Beauxbatons'], ['imported_person_...', ('Anthony', 'Goldstein'), nan]], {('Anthony', 'Goldstein')}, [('Delacour, Gabrielle G.', [('Delacour, Gabrielle', 93)])])
+    >>> validate_internal_authors([('Harry', 'Potter')], "sample_internal_persons.xlsx")
+    ([[345262, ('Harry', 'Potter'), 'Ilvermorny ']], set(), [('Potter, Harry', [('Potter, Larry', 92), ('Potter, Gary', 88)])])
+    >>> validate_internal_authors([('Angelina', 'Johnson')], "sample_internal_persons.xlsx")
+    ([[861581, ('Angelina', 'Johnson'), 'Hogwarts']], set(), [('Johnson, Angelina', [('Johnson, Angela', 94)])])
+    """
+    matches_log = []
+    validated_authors = []
     # Create DataFrame; read in last name, first name, Pure ID
     df = pd.read_excel(internal_persons, sheet_name="Persons (0)_1",
-                       usecols=["2 Last, first name", "3 Name > Last name", "4 Name > First name", "18 ID"], encoding='utf-8')
-
+                       usecols=["2 Last, first name", "3 Name > Last name", "4 Name > First name", "18 ID", "7.1 Organizations > Organizational unit[1]"], encoding='utf-8')
+    columns_mapper = {'7.1 Organizations > Organizational unit[1]': 'unit'}
+    df = df.rename(columns=columns_mapper)
+    external_authors = set()
     strings_to_check = df["2 Last, first name"].to_list()
-
     for author in author_list:
         correct_string = str(author[1] + ", " + author[0])
         ratios = []
@@ -152,71 +196,124 @@ def validate_internal_authors(author_list: list, internal_persons: str, detailed
                 break
             else:
                 ratio = fuzz.ratio(string, correct_string)
-                if ratio > 79:
+                if ratio > custom_ratio:
                     ratios.append((string, ratio))
         if len(ratios) == 1:
             # Look up ratios[0] in df, return the ID of that match using .loc
             select_row = df.loc[df["2 Last, first name"] == ratios[0][0]]
-            auth_id = int(select_row["18 ID"])
+            auth_id = select_row["18 ID"].item()
+            auth_id = int(auth_id)
+            unit_affiliation = select_row['unit'].item()
+            matches_log.append((correct_string, ratios))
         elif len(ratios) == 0:
             # Author not found in Internal Persons file - assign random ID
             auth_id = "imported_person_" + str(random.randrange(0, 1000000)) + str(random.randrange(0, 1000000))
+            unit_affiliation = np.nan
+            external_authors.add(author)
         else:
             # If more than 1 person from Internal Persons file matched, return highest match
             ratios.sort(key=lambda x: x[1], reverse=True)
-            if detailed_output is True:
-                print("Author name as listed in CSV file: {}".format(correct_string))
-                print("Internal persons matching to author: ")
-                for ratio in ratios:
-                    print(ratio)
-                print("Author matched to result with highest ratio number listed above.")
+            matches_log.append((correct_string, ratios))
             # Use position within list to get back to the string, look up string in df to return ID using .loc
             select_row = df.loc[df["2 Last, first name"] == ratios[0][0]]
-            auth_id = int(select_row["18 ID"])
-        validated_authors.append([auth_id, author])
-    return validated_authors
+            auth_id = select_row["18 ID"].item()
+            auth_id = int(auth_id)
+            unit_affiliation = select_row['unit'].item()
+        validated_authors.append([auth_id, author, unit_affiliation])
+    return validated_authors, external_authors, matches_log
 
 
-def write_author(author_list) -> str:
+def write_author(author_list: list) -> str:
     """
     Given authors and ID, insert into XML snippet, and return XML snippet.
 
     :param author_list: A list of lists: ID in position 0, tuple with 1+ authors in position 1 [[ID, ('First','Last')]]
     :return: XML snippet for authors
-    >>> write_author([[123, ('Angelina', 'Johnson')], [456, ('Gabrielle G.', 'Delacour')], [789, ('Anthony', 'Goldstein')]])
+
+    >>> write_author([[123, ('Angelina', 'Johnson'), 'Hogwarts'], [456, ('Gabrielle G.', 'Delacour'), 'Beauxbatons'], [789, ('Anthony', 'Goldstein'), np.nan]])     #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    <v1:author>
+    ...
+    </v1:author>
     """
     authors_xml_snippet = ""
     n = 0
     for author in author_list:
-        authors_xml_snippet += """
-        <v1:author>
+        authors_xml_snippet += """<v1:author>
             <v1:role>author</v1:role>
             <v1:person id='""" + str(author[0]) + """'>
                 <v1:firstName>""" + str(author[1][0]) + """</v1:firstName>
                 <v1:lastName>""" + str(author[1][1]) + """</v1:lastName>
-            </v1:person>
+            </v1:person>"""
+        if author[2] is not np.nan:
+            authors_xml_snippet += """
+             <v1:organisations>
+                    <v1:organisation>
+                        <v1:name>
+                            <v3:text>""" + author[2] + """</v3:text>
+                        </v1:name>
+                    </v1:organisation>
+                </v1:organisations>"""
+        authors_xml_snippet += """
         </v1:author>
         """
         n += 1
     return authors_xml_snippet
 
 
+def write_editor(editor_list: list) -> str:
+    """
+    Given a list of editors, insert into XML snippet, and return XML snippet
+    :param editor_list: A list of 1+ editors structured as [('First','Last'),('First','Last')]
+    :return: XML snippet for editors
+
+    >>> write_editor([('Bertha B.', 'Jorkins')])   #doctest: +NORMALIZE_WHITESPACE
+    '<v1:editors>
+        <v1:editor>
+        <v3:firstname>Bertha B.</v3:firstname>
+        <v3:lastname>Jorkins</v3:lastname>
+        </v1:editor>
+    </v1:editors>'
+    >>> write_editor([('Angelina', 'Johnson'), ('Gabrielle G.', 'Delacour'), ('Anthony', 'Goldstein')])   #doctest: +ELLIPSIS   +NORMALIZE_WHITESPACE
+    '<v1:editors>\n        <v1:editor>\n        <v3:firstname>Angelina</v3:firstname>\n        <v3:lastname>Johnson</v3:lastname>\n        </v1:editor>\n        <v1:editor>\n        <v3:firstname>Gabrielle G.</v3:firstname>\n        <v3:lastname>Delacour</v3:lastname>\n        </v1:editor>\n        <v1:editor>\n        <v3:firstname>Anthony</v3:firstname>\n        <v3:lastname>Goldstein</v3:lastname>\n        </v1:editor>\n    </v1:editors>'
+    """
+
+    editors_xml_snippet = "<v1:editors>"
+    n = 0
+    for editor in editor_list:
+        editors_xml_snippet += """
+        <v1:editor>
+        <v3:firstname>""" + editor[0] + """</v3:firstname>
+        <v3:lastname>""" + editor[1] + """</v3:lastname>
+        </v1:editor>"""
+    editors_xml_snippet += """
+    </v1:editors>"""
+    return editors_xml_snippet
+
+
 def write_group_author(group_authors: str) -> str:
     """
     Given a string with a variable length of group author, insert into XML snippet, and return XML snippet
+    NOTE: Group author does not require a primary key/unique ID
+
     :param group_authors: A string containing 1+ group authors, with multiple authors separated by || double pipes
     :return: XML snippet with group authors
-    >>> write_group_author("Illinois Institute of Technology||Illinois Waste Management and Research Center")
+
+    >>> write_group_author("Beauxbatons||Durmstrang")   #doctest: +NORMALIZE_WHITESPACE
     '<v1:author>
         <v1:role>author</v1:role>
-        <v1:groupAuthor>Illinois Institute of Technology</v1:groupAuthor>
+        <v1:groupAuthor>Beauxbatons</v1:groupAuthor>
     </v1:author>
     <v1:author>
         <v1:role>author</v1:role>
-        <v1:groupAuthor>Illinois Waste Management and Research Center</v1:groupAuthor>
+        <v1:groupAuthor>Durmstrang</v1:groupAuthor>
     </v1:author>'
+    >>> write_group_author("Hogwarts School")
+    '<v1:author>\n            <v1:role>author</v1:role>\n            <v1:groupAuthor>Hogwarts School</v1:groupAuthor>\n        </v1:author>\n        '
     """
-    groups = group_authors.split("||")
+    if "||" in group_authors:
+        groups = group_authors.split("||")
+    else:
+        groups = [group_authors]
     group_authors_xml_snippet = ""
     if group_authors != "":
         for one_group_author in groups:
@@ -234,18 +331,14 @@ def write_keywords(all_keywords: str) -> str:
 
     :param all_keywords: A string containing 1+ subject keywords separated by || double pipes
     :return: An XML snippet for subject keywords
-    >>> write_keywords("Water pollution -- Illinois||Illinois River||Metals -- Water pollution -- Illinois||Polycyclic aromatic hydrocarbons -- Water pollution -- Illinois")
-    '<v3:freeKeyword>
-        <v3:text>Water pollution -- Illinois</v3:text>
+
+    >>> write_keywords("Divination -- Crystal balls||Divination -- Tea leaves||Divination -- Palmistry")    #doctest: +NORMALIZE_WHITESPACE
     </v3:freeKeyword>
     <v3:freeKeyword>
-        <v3:text>Illinois River</v3:text>
+        <v3:text>Divination -- Tea leaves</v3:text>
     </v3:freeKeyword>
     <v3:freeKeyword>
-        <v3:text>Metals -- Water pollution -- Illinois</v3:text>
-    </v3:freeKeyword>
-    <v3:freeKeyword>
-        <v3:text>Polycyclic aromatic hydrocarbons -- Water pollution -- Illinois</v3:text>
+        <v3:text>Divination -- Palmistry</v3:text>
     </v3:freeKeyword>'
     """
     # Handle list of keywords separated by ; rather than ||
@@ -256,37 +349,30 @@ def write_keywords(all_keywords: str) -> str:
     keywords_xml_snippet = ""
     if all_keywords != "":
         for keyword in keywords:
-            keywords_xml_snippet += """
-    <v3:freeKeyword>
-        <v3:text>""" + keyword.strip() + """</v3:text>
+            keywords_xml_snippet += """<v3:freeKeyword>
+    <v3:text>""" + keyword.strip() + """</v3:text>
     </v3:freeKeyword>"""
     return keywords_xml_snippet
 
 
-def write_series(all_series: str, number, issn) -> str:
+def write_series(all_series: str, number: int, issn: str) -> str:
     """
-    Write series information to XML snippet
+    Write series information to XML snippet.
 
     :param all_series: A string containing 1+ series separated by || double pipes. Series number information, if provided, is separated by ; colon.
-    :param number:
-    :param issn:
+    :param number: An int or np.nan containing series number.
+    :param issn: A string or np.nan containing series issn.
     :return: XML snippet containing series information.
-    >>> write_series("Hazardous Waste Research and Information Center Research Report Series; RR-054||Illinois State Geological Survey Environmental Geology; 137", np.nan, np.nan)
-    '<v1:serie>
-        <v1:name>Hazardous Waste Research and Information Center Research Report Series</v1:name>
-        <v1:number>RR-054</v1:number>
-    </v1:serie>
-    <v1:serie>
-        <v1:name>Illinois State Geological Survey Environmental Geology</v1:name>
-        <v1:number>137</v1:number>
-    </v1:serie>'
-    >>> write_series("Illinois Natural History Survey Manual",15,np.nan)
-    >>> write_series("Illinois Natural History Survey Manual",np.nan,"12345678") #doctests: +NORMALIZE_WHITESPACE
-    '\n            <v1:serie>\n                <v1:name>Illinois Natural History Survey Manual</v1:name><v1:printIssns>\n        <v1:Issn>12345678</v1:Issn>\n        </v1:printIssns>'
+
+    >>> write_series("Animal Transfiguration Report Series; T-054||Hogwarts School Reports;00-11", np.nan, np.nan)
+    '<v1:serie>\n    <v1:name><![CDATA[Animal Transfiguration Report Series]]></v1:name>\n    <v1:number>T-054</v1:number>\n</v1:serie>\n            <v1:serie>\n    <v1:name><![CDATA[Hogwarts School Reports]]></v1:name>\n    <v1:number>00-11</v1:number>\n</v1:serie>\n            '
+    >>> write_series("Potion Brewing Manual",15,np.nan)
+     '<v1:serie>\n            <v1:name><![CDATA[Potion Brewing Manual]]></v1:name>\n            <v1:number>15</v1:number>\n            \n            </v1:serie>'
+    >>> write_series("Survey of Herbology Manual",np.nan,"12345678") #doctest: +NORMALIZE_WHITESPACE
+     '<v1:serie>\n            <v1:name><![CDATA[Survey of Herbology Manual]]></v1:name><v1:printIssns>\n        <v1:issn>12345678</v1:issn>\n        </v1:printIssns>\n            </v1:serie>'
     """
     if "||" in all_series:
         series = all_series.split("||")  # Series is a list of serie
-#        authors_by_full_name = authors.split("||")
     else:
         series = [all_series]
 
@@ -307,17 +393,18 @@ def write_series(all_series: str, number, issn) -> str:
                 serie_name = str(one_serie)
                 serie_number = ""
             series_xml_snippet += """<v1:serie>
-                <v1:name>""" + serie_name.strip() + """</v1:name>
-                <v1:number>""" + serie_number.strip() + """</v1:number>
-            </v1:serie>
+        <v1:name><![CDATA[""" + serie_name.strip() + """]]></v1:name>
+        <v1:number>""" + serie_number.strip() + """</v1:number>
+    </v1:serie>
             """
     else:
         for one_serie in series:
             series_xml_snippet += """<v1:serie>
-                <v1:name>""" + one_serie.strip() + """</v1:name>"""
+            <v1:name><![CDATA[""" + one_serie.strip() + """]]></v1:name>"""
             if number is not np.nan:
                 series_xml_snippet += """
-                <v1:number>""" + str(number).strip() + """</v1:number>"""
+            <v1:number>""" + str(number).strip() + """</v1:number>
+            """
             if issn is not np.nan:
                 series_xml_snippet += write_barcodes(issn, 'issn')
             series_xml_snippet += """
@@ -332,6 +419,7 @@ def write_barcodes(all_barcodes: str, barcode_type: str) -> str:
     :param all_barcodes: A string containing 1+ ISSN barcode numbers, separated by ", " or ISBN barcodes, separated by " "
     :param barcode_type: String denoting ISSN, ISBN, etc.
     :return: An XML snippet for ISSN keywords
+
     >>> write_barcodes("0309-166X, 1464-3545",'issn') #doctest: +NORMALIZE_WHITESPACE
     '<v1:printIssns>
         <v1:Issn>0309-166X</v1:Issn>
@@ -372,43 +460,22 @@ def set_research_output_type(research_id, type_value: str) -> dict:
     :param type_value: Contents of type column
     :return: Dictionary w/ type and subtype e.g. {'type':'book','subType':'technical_report'}
     """
-    """ 
-    MAPPING FROM XSD 
-     <xs:element name="publications">
-        <xs:complexType>
-            <xs:choice maxOccurs="unbounded" minOccurs="1">
-                <xs:element ref="contributionToJournal" />
-                <xs:element ref="chapterInBook" />
-                <xs:element ref="contributionToConference" />
-                <xs:element ref="contributionToSpecialist" />
-                <xs:element ref="patent" />
-                <xs:element ref="other" />
-                <xs:element ref="book" />
-                <xs:element ref="workingPaper" />
-                <xs:element ref="nonTextual" />
-                <xs:element ref="memorandum" />
-                <xs:element ref="contributionToMemorandum" />
-                <xs:element ref="thesis" />
-            </xs:choice>
-        </xs:complexType>
-    </xs:element>
-    """
     research_output_type = {}
-    if 'book' in type_value.lower():
+    if 'booksection' in type_value.lower():
+        research_output_type['type'] = 'chapterInBook'
+        research_output_type['subType'] = 'chapter'
+    elif 'book' in type_value.lower():
         research_output_type['type'] = 'book'
         research_output_type['subType'] = 'book'
     elif 'technical' in type_value.lower() or 'report' in type_value.lower():
         research_output_type['type'] = 'book'
         research_output_type['subType'] = 'technical_report'
-    elif 'booksection' in type_value.lower():
-        research_output_type['type'] = 'chapterInBook'
-        research_output_type['subType'] = 'chapter'
     elif 'other' in type_value.lower() and 'conference' in type_value.lower():
         research_output_type['type'] = 'contributionToConference'
         research_output_type['subType'] = 'other'
     elif 'conference' in type_value.lower() or 'conferencepaper' in type_value.lower() or 'proceeding' in type_value.lower():
-        research_output_type['type'] = 'contributionToConference'
-        research_output_type['subType'] = 'paper'
+        research_output_type['type'] = 'chapterInBook'
+        research_output_type['subType'] = 'conference'
     elif 'journal' in type_value.lower() or 'article' in type_value.lower() or 'journalarticle' in type_value.lower():
         research_output_type['type'] = 'contributionToJournal'
         research_output_type['subType'] = 'article'
@@ -419,7 +486,7 @@ def set_research_output_type(research_id, type_value: str) -> dict:
     return research_output_type
 
 
-def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organization_name: str, url_text: str, outfile_name: str):
+def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organization_name: str, outfile_name: str, fuzzy_match_ratio=79, detailed_output=False):
     """
     Given csv data and the filename you want,
     Print data into an XML file, call helper functions depending on what columns are included in the data.
@@ -428,11 +495,22 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
     :param internal_persons: Str reference to Pure - Internal Persons file against which to validate the list of authors in csv_data.
     :param managing_unit: Value for the organizational owner can be found in Pure portal. Internal to Pure system.
     :param organization_name: Appears as the research's affiliated unit on the portal.
-    :param url_text: Appears on portal as the description of a URL, e.g. "IDEALS Repository Link".
     :param outfile_name: The name specified for the XML outfile.
+    :param fuzzy_match_ratio: Optionally, change the fuzzy match ratio.
+    :param detailed_output: Bool, default False. If true, output validation tools.
     :return: None
     """
     total_research_outputs = len(csv_data)
+
+    # Collect optional detailed output about external persons and groupAuthors, for manual review before XML import
+    if detailed_output is True:
+        internal_matches_outfile = open("validation_tools/internal_person_matches.txt", "w", encoding='utf-8')
+        print("(Author name as listed in research publication, (Internal persons matching to author, ratio score))", file=internal_matches_outfile)
+        externals_outfile = open("validation_tools/external_persons.txt", "w", encoding='utf-8')
+        group_authors_outfile = open("validation_tools/group_authors.txt", "w", encoding='utf-8')
+    external_persons = list()
+    groups_to_print = list()
+    internal_matches = list()
 
     # Collect all headers included in this CSV into a list for verifying contents of this specific CSV
     csv_headers = []
@@ -442,11 +520,11 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             if key not in csv_headers:
                 csv_headers.append(key)
 
-    # Prepare outfile
+    # Prepare XML outfile
     outfile = open(outfile_name, "w", encoding='utf-8')
 
     # Print the Pure XML namespaces above the loop through each research output.
-    # NOTE: You must download these namespaces from the Pure portal (Administrator > Bulk import). Link them to your XML before validating.
+    # NOTE: Download these namespaces from the Pure portal (Administrator > Bulk import). Link them to your XML before validating.
     print('<?xml version="1.0" encoding="utf-8"?>', file=outfile)
     print('<v1:publications xmlns:v3="v3.commons.pure.atira.dk" xmlns:v1="v1.publication-import.base-uk.pure.atira.dk">',
           file=outfile)
@@ -484,9 +562,13 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             year = date
         else:
             year = date[:4]
+            # EXPECTED DATE FORMAT: YYYY-MM-DD
+            # Fix dates containing / instead of -
+            if "/" in date:
+                reformat = date.split("/")
+                date = str(reformat[2]) + "-" + str(reformat[0]) + "-" + str(reformat[1])
         print('<v3:year>' + year + '</v3:year>', file=outfile)
         if len(date) > 4:
-            # EXPECTED DATE FORMAT: YYYY-MM-DD
             full_date = date.split("-")
             month = full_date[1]
             print('<v3:month>' + month + '</v3:month>', file=outfile)
@@ -503,24 +585,28 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
 
         # Research output title
         print('<v1:title>', file=outfile)
-        titles = []
-        if ":" in row['title']:
-            titles = row['title'].split(":")
-            print('<v3:text lang="en" country="US"><![CDATA[' + titles[0].strip() + ']]></v3:text>', file=outfile)
-        else:
-            print('<v3:text lang="en" country="US"><![CDATA[' + row['title'] + ']]></v3:text>', file=outfile)
+        print('<v3:text lang="en" country="US"><![CDATA[' + row['title'] + ']]></v3:text>', file=outfile)
         print('</v1:title>', file=outfile)
 
-        # Research output subtitle
-        if len(titles) > 1:
-            print('<v1:subTitle>', file=outfile)
-            print('<v3:text lang="en" country="US"><![CDATA[' + titles[1].strip() + ']]></v3:text>', file=outfile)
-            print('</v1:subTitle>', file=outfile)
-        elif 'subtitle' in csv_headers:
-            if row['subtitle'] != "":
-                print('<v1:subTitle>', file=outfile)
-                print('<v3:text lang="en" country="US"><![CDATA[' + row['subtitle'] + ']]></v3:text>', file=outfile)
-                print('</v1:subTitle>', file=outfile)
+        # # Split into title and subtitle - feature disabled
+        # titles = []
+        # if ":" in row['title']:
+        #     titles = row['title'].split(":")
+        #     print('<v3:text lang="en" country="US"><![CDATA[' + titles[0].strip() + ']]></v3:text>', file=outfile)
+        # else:
+        #     print('<v3:text lang="en" country="US"><![CDATA[' + row['title'] + ']]></v3:text>', file=outfile)
+        # print('</v1:title>', file=outfile)
+        #
+        # # Research output subtitle
+        # if len(titles) > 1:
+        #     print('<v1:subTitle>', file=outfile)
+        #     print('<v3:text lang="en" country="US"><![CDATA[' + titles[1].strip() + ']]></v3:text>', file=outfile)
+        #     print('</v1:subTitle>', file=outfile)
+        # elif 'subtitle' in csv_headers:
+        #     if row['subtitle'] != "":
+        #         print('<v1:subTitle>', file=outfile)
+        #         print('<v3:text lang="en" country="US"><![CDATA[' + row['subtitle'] + ']]></v3:text>', file=outfile)
+        #         print('</v1:subTitle>', file=outfile)
 
         # Abstract
         if row['abstract'] != "":
@@ -530,11 +616,16 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
 
         # Persons (authors)
         print('<v1:persons>', file=outfile)
-        authors = reformat_author(row['creator'])
-        valid_author = validate_internal_authors(authors, internal_persons)
-        print(write_author(valid_author), file=outfile)
-
+        authors, groupAuths = reformat_author(row['id'], row['creator'])
+        groups_to_print.extend(groupAuths)
+        if authors[0][0] != '':
+            valid_author, externals, matches = validate_internal_authors(authors, internal_persons, fuzzy_match_ratio)
+            print(write_author(valid_author), file=outfile)
+            external_persons.extend(list(externals))
+            internal_matches.extend(matches)
         # Persons (group authors, organizational authors)
+        else:
+            print(write_group_author(authors[0][-1]), file=outfile)
         if 'groupauthor' in csv_headers:
             print(write_group_author(row['groupauthor']), file=outfile)
         print('</v1:persons>', file=outfile)
@@ -554,8 +645,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
         # Keywords (subjects)
         if 'subject' in csv_headers:
             if row['subject'] != "":
-                print('''
-                <v1:keywords>
+                print('''<v1:keywords>
                     <v3:logicalGroup logicalName="keywordContainers">
                         <v3:structuredKeywords>
                             <v3:structuredKeyword>
@@ -566,11 +656,6 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
                             </v3:structuredKeyword>
                         </v3:structuredKeywords>
                     </v3:logicalGroup>
-                    <v3:logicalGroup logicalName="librarianKeywordContainers">
-                        <v3:structuredKeywords>
-                            <v3:structuredKeyword classification="/dk/atira/pure/core/keywords/A/AC"/>
-                        </v3:structuredKeywords>
-                    </v3:logicalGroup>
                 </v1:keywords>''', file=outfile)
 
         # URL
@@ -578,9 +663,6 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             print('''<v1:urls>
                   <v1:url>
                   <v1:url>''' + row['url'] + '''</v1:url>
-                  <v1:description>
-                  <v3:text>''' + url_text + '''</v3:text>
-                  </v1:description>
                   <v1:type>unspecified</v1:type>
                   </v1:url>
             </v1:urls>''', file=outfile)
@@ -614,11 +696,11 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             # NUMBER OF PAGES
             if 'pages' in csv_headers:
                 if row['pages'] != "":
-                    print('<v1:numberOfPages>' + row['pages'] + '</v1:numberOfPages>', file=outfile)
+                    print('<v1:numberOfPages>' + str(row['pages']) + '</v1:numberOfPages>', file=outfile)
             # JOURNAL INFO
             if 'issue' in csv_headers:
                 if row['issue'] != '':
-                    print('<v1:journalNumber>' + row['issue'] + '</v1:journalNumber>', file=outfile)
+                    print('<v1:journalNumber>' + str(row['issue']) + '</v1:journalNumber>', file=outfile)
             if 'volume' in csv_headers:
                 if row['volume'] != '':
                     print('<v1:journalVolume>' + row['volume'] + '</v1:journalVolume>', file=outfile)
@@ -635,7 +717,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
             # PAGES COUNT
             if 'pages' in csv_headers:
                 if row['pages'] != "":
-                    print('<v1:numberOfPages>' + row['pages'] + '</v1:numberOfPages>', file=outfile)
+                    print('<v1:numberOfPages>' + str(row['pages']) + '</v1:numberOfPages>', file=outfile)
 
             # Place of Publication
             if row['place of publication'] != "":
@@ -670,11 +752,10 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
                         print(write_series(row['relation'], np.nan, np.nan), file=outfile)
                     print('''</v1:series>''', file=outfile)
 
-            # HOST PUBLICATION TITLE - CH. IN BOOK
-            elif ro_type['subType'] == 'chapter':
+            # HOST PUBLICATION TITLE - CH. IN BOOK - REQUIRED FIELD
+            if ro_type['type'] == 'chapterInBook':
                 if 'journal' in csv_headers:
-                    if row['journal'] != "":
-                        print('<v1:hostPublicationTitle>' + row['journal'] + '</v1:hostPublicationTitle>', file=outfile)
+                    print('<v1:hostPublicationTitle>' + row['journal'] + '</v1:hostPublicationTitle>', file=outfile)
 
             # PUBLISHER
             if row['publisher'] != "":
@@ -683,20 +764,24 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
                   </v1:publisher>''', file=outfile)
 
             # EDITORS
-            #     if row[17] != "":
-            #         print('<v1:editors>', file=outfile)
-            #         print('''<v1:editor>
-            #               <v3:firstname>'''+row[18]+'''</v3:firstname>
-            #               <v3:lastname>'''+row[17]+'''</v3:lastname>
-            #               </v1:editor>''',file=outfile)
-            #         print('</v1:editors>', file=outfile)
+            if row['editor'] != "":
+                editors, group_eds = reformat_author(row['id'], row['editor'])
+                if len(editors) >= 1:
+                    print(write_editor(editors), file=outfile)
 
             # CHAPTER IN BOOK - SERIES APPEARS BELOW EDITOR
             if ro_type['subType'] == 'chapter':
                 if 'relation' in csv_headers:
                     if row['relation'] != "":
                         print('''<v1:series>''', file=outfile)
-                        print(write_series(row['relation']), file=outfile)
+                        if 'series number' in csv_headers and 'issn' in csv_headers:
+                            print(write_series(row['relation'], row['series number'], row['issn']), file=outfile)
+                        elif 'series number' in csv_headers:
+                            print(write_series(row['relation'], row['series number'], np.nan), file=outfile)
+                        elif 'issn' in csv_headers:
+                            print(write_series(row['relation'], np.nan, row['issn']), file=outfile)
+                        else:
+                            print(write_series(row['relation'], np.nan, np.nan), file=outfile)
                         print('''</v1:series>''', file=outfile)
 
         # Publication type - Closing tag
@@ -707,34 +792,71 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
     outfile.close()
 
     # Print logic check to console.
-    print("CSV contains {} research outputs.\n{} research outputs were saved to XML file.".format(total_research_outputs, counter))
+    print("{} research outputs found in CSV file.\n{} research outputs saved to XML file.\n".format(total_research_outputs, counter))
+
+    # Prepare optional validation outfiles
+    if detailed_output is True:
+        # print detailed output regarding internal matches
+        im = set()
+        for match_data in internal_matches:
+            im.add((match_data[0],match_data[1][0]))
+        internal_matches = list(im)
+        internal_matches.sort(key=lambda x: x[1][1])
+        for match in internal_matches:
+            print(match, file=internal_matches_outfile)
+        # print detailed output regarding external persons
+        final_externals = set(external_persons)
+        final_externals = list(final_externals)
+        final_externals.sort(key=lambda x: x[1])
+        for person in final_externals:
+            print(person[0] + " " + person[1], file=externals_outfile)
+        # print detailed output regarding groupAuthors
+        if len(groups_to_print) >= 1:
+            print("NOTE: The following authors are not correctly formatted as 'Author Last Name, First Name'. Values were converted from Author to groupAuthor. To make changes, re-run after checking rows with the following IDs.",
+                  file=group_authors_outfile)
+            for group in groups_to_print:
+                if len(group) != 0:
+                    print(group, file=group_authors_outfile)
+        else:
+            print("No group authors found", file=group_authors_outfile)
+        # Remind re: detailed output on console
+        v_tools = [("Internal person matches", "internal_person_matches.txt"),
+                   ("External persons list", "external_persons.txt"),
+                   ("Group authors list", "group_authors.txt")]
+        for v_tool in v_tools:
+            print("{} saved to: validation_tools/{}".format(v_tool[0], v_tool[1]))
+        # Close outfiles
+        externals_outfile.close()
+        group_authors_outfile.close()
+        internal_matches_outfile.close()
     return outfile
 
 
 if __name__ == '__main__':
+    # Set up infile and outfile names
+    filename = '../ExpertsSCP/PRI/2021/PRIInHouseReports2020_01_19.csv'                             # Step 1
+    outfile = "testing_validation_files.xml"                                                        # Step 2
+
+    # Select file type to process
     file_type = str(input('Enter a Z for Zotero file or D for DublinCore file. '))
     if file_type.lower() in ['z', 'zotero']:
         # Load the Zotero CSV file
-        filename = '../ExpertsSCP/PRI/2021/PRIConferencePapers.csv'
-        print('\nNow processing ' + filename + '...\n')
+        print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_zotero_csv(filename)
     elif file_type.lower() in ['d', 'dublincore', 'dublin core']:
         # Load the templated CSV file
-        filename = "../ExpertsSCP/refactored_code/dummy_technical_report_data.csv"
-        print('\nNow processing ' + filename + '...\n')
+        print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_preformatted_csv(filename)
     else:
         raise ValueError('Invalid input.')
 
-    # TODO: Allow user to input the values for the following variables
     # Load the names and IDs from Pure of internal Pure persons
-    researchers = "../ExpertsSCP/PRI/PRI_faculty_in_pure.xls"
+    researchers = "../ExpertsSCP/PRI/PRI_faculty_in_pure.xls"                                       # Step 3
     # Enter managing unit, organization name, and URL variables
-    mgr_unit = "123"
-    org_name = "Prairie Research Institute"
-    url = ""
-    # Name the outfile
-    outfile = "PRI_conf_2021_79ratio.xml"
+    mgr_unit = "add here"                                                                           # Step 4
+    org_name = "add here"                                                                           # Step 4
 
     # Print the XML
-    outgoing_xml = write_xml(incoming_metadata, researchers, mgr_unit, org_name, url, outfile)
+    outgoing_xml = write_xml\
+        (incoming_metadata, researchers, mgr_unit, org_name, outfile, detailed_output=True)     # Step 5
+    print("\nOutfile saved as: {}".format(outfile))

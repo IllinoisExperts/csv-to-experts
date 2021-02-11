@@ -9,10 +9,11 @@ STEPS:
 1. Set the source file.
 2. Set the destination file.
 3. Confirm the Internal Persons file (against which authors will be matched).
-4. Confirm the Managing Unit and Organization Name to be applied to all records.
-5. Optionally: Change the default fuzzy matching ratio.
-6. Optionally: Output validation tools.
-6. Run the program.
+4. Confirm the Managing Unit to be applied to all records.
+5. Confirm the Organization Name to be applied to all records.
+6. Optionally: Change the default fuzzy matching ratio.
+7. Optionally: Output validation tools.
+8. Run the program.
 
 OUTPUTS:
 - XML file
@@ -854,9 +855,9 @@ if __name__ == '__main__':
     researchers = "../ExpertsSCP/PRI/PRI_faculty_in_pure.xls"                                       # Step 3
     # Enter managing unit, organization name, and URL variables
     mgr_unit = "add here"                                                                           # Step 4
-    org_name = "add here"                                                                           # Step 4
+    org_name = "add here"                                                                           # Step 5
 
     # Print the XML
     outgoing_xml = write_xml\
-        (incoming_metadata, researchers, mgr_unit, org_name, outfile, detailed_output=True)     # Step 5
+        (incoming_metadata, researchers, mgr_unit, org_name, outfile, detailed_output=True)     # Steps 6 and 7
     print("\nOutfile saved as: {}".format(outfile))

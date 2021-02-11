@@ -835,8 +835,8 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
 
 if __name__ == '__main__':
     # Set up infile and outfile names
-    filename = '../ExpertsSCP/PRI/2021/PRIInHouseReports2020_01_19.csv'                             # Step 1
-    outfile = "testing_validation_files.xml"                                                        # Step 2
+    filename = '../path/of/your/file.csv'                                                           # Step 1
+    outfile = "choose_a_name.xml"                                                                   # Step 2
 
     # Select file type to process
     file_type = str(input('Enter a Z for Zotero file or D for DublinCore file. '))
@@ -852,7 +852,7 @@ if __name__ == '__main__':
         raise ValueError('Invalid input.')
 
     # Load the names and IDs from Pure of internal Pure persons
-    researchers = "../ExpertsSCP/PRI/PRI_faculty_in_pure.xls"                                       # Step 3
+    researchers = "../path/of/Pure_exported/excel_file.xls"                                         # Step 3
     # Enter managing unit, organization name, and URL variables
     mgr_unit = "add here"                                                                           # Step 4
     org_name = "add here"                                                                           # Step 5

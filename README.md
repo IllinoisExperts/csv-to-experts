@@ -2,6 +2,7 @@
 CSV to Experts is a Python module that converts a CSV file of either Zotero bibliographic metadata or dc metadata records to valid XML for ingest by the Illinois Experts Research Information Management System.
 
 ### Current Scope
+Supported publication types:
 - Technical Report
 - Book
 - Chapter in Book
@@ -14,12 +15,12 @@ CSV to Experts is a Python module that converts a CSV file of either Zotero bibl
 
 ### Known issues
 - "Contributor" field in dc metadata records is currently ignored.
-- Listing an organization as an author, instead of group author, will break the code.
 - Before running the script, encode or escape special characters in your CSV.  For example, insert encodings \&lt; for less than (<) and \&gt; for greater than (>).
 This ensures they will not break the XML during validation.
 
 ### How to use
 - Export a CSV of citations from Zotero. Alternately, prepare a CSV file: See the template for required headers.  
+- Follow the steps detailed in the package description to run the program. 
 - Afterwards, the XML outfile must be validated. 
 - Then it is ready to be bulk uploaded in the Pure portal.
 

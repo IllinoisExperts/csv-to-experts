@@ -29,4 +29,5 @@ This ensures they will not break the XML during validation.
 - All rows must have at least one author.
 
 ### For more information
-For more information on preparing a data set for bulk uploading in Pure, see: https://experts.illinois.edu/admin/services/import/documentation.pdf 
+For more information on preparing a data set for bulk uploading in Pure, see: 
+https://experts.illinois.edu/admin/services/import/documentation.pdf 

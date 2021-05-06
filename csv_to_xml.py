@@ -98,17 +98,27 @@ def load_zotero_csv(csv_file: str) -> list:
     allrows = df.to_dict(orient='records')
     return allrows
 
+def load_patents(json_file: str) -> list:
+    """
+    TODO: Accept a JSON file of patents data, reshape to match expected data structure
 
-def compare_records(old_records,xml_file):
+    :param json_file: A JSON file returned from find_patents module
+    :return: A list of dictionaries, where each row of data is a dictionary containing header:value pairs
+    """
+
+
+def compare_records(old_records, xml_infile_name, new_xml_outfile_name):
     """
     Compare two lists of research titles (those already imported to Pure and those which are new)
     Make a list of the overlapping titles (basic string matching) and their Bibtex/Pure IDs, Zotero IDs
     Those are the ones that need to be updated - read in and update
 
+    :param old_records: String name pointing to a CSV of the IDs, titles, and publication type of both old and current records. e.g. 'id_title_type.csv'
+    :param xml_infile_name: XML file to update
+    :param new_xml_outfile_name: New, updated XML file to be generated
     :return: Nothing; prints an XML file
     """
     # Read in a CSV of the IDs, titles, and publication type of both old and current records.
-    old_records = 'id_title_type.csv'
     allrows = []
     with open(old_records, 'r', newline='', encoding='utf-8') as infile:
         csvin = csv.reader(infile, delimiter='|')
@@ -150,14 +160,14 @@ def compare_records(old_records,xml_file):
     for key, value in too_many_matches.items():
         print(key, value)
 
-    xml_infile = open("PRI_2021_updated_records_v5.xml", "r", encoding="utf-8")
+    xml_infile = open(xml_infile_name, "r", encoding="utf-8")
     xml = xml_infile.read()
 
     for key, value in matched_ids.items():
         # Note: If match not found, nothing happens...
         xml = re.sub(value[-1], value[0], xml)
 
-    new_xml_outfile = open("PRI_2021_updated_records_v5_matched.xml", "w", encoding="utf-8")
+    new_xml_outfile = open(new_xml_outfile_name, "w", encoding="utf-8")
     new_xml_outfile.write(xml)
 
     new_xml_outfile.close()
@@ -970,14 +980,17 @@ if __name__ == '__main__':
 
     # Select file type to process
     file_type = str(input('Enter a Z for Zotero file or D for DublinCore file. '))
-    if file_type.lower() in ['z', 'zotero']:
+    if file_type.lower().strip() in ['z', 'zotero']:
         # Load the Zotero CSV file
         print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_zotero_csv(filename)
-    elif file_type.lower() in ['d', 'dublincore', 'dublin core']:
+    elif file_type.lower().strip() in ['d', 'dublincore', 'dublin core']:
         # Load the templated CSV file
         print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_preformatted_csv(filename)
+    elif file_type.lower().strip() in ['p', 'patent']:
+        print('\nNow processing: ' + filename + '...\n')
+        incoming_metadata = load_patents(filename)
     else:
         raise ValueError('Invalid input.')
 

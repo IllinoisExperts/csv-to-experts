@@ -973,6 +973,58 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
     return outfile
 
 
+def write_patents_xml(data, internal_persons: str, managing_unit: str, organization_name: str, outfile_name: str, fuzzy_match_ratio=79):
+    """
+    Patents XML structure is quite different from others
+    """
+    # DUMMY DATA
+    otm_id = "012"
+    patent_number = "123"
+    year = "2020"
+    title = "test"
+    abstract = "abstract"
+
+    # FIRST DRAFT
+    print("""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<publications xmlns="v1.publication-import.base-uk.pure.atira.dk" xmlns:ns2="v3.commons.pure.atira.dk">""")
+    print("<patent id=" + otm_id + " subType='patent'>")
+    print("""
+    <peerReviewed>false</peerReviewed>
+    <publicationStatuses>
+      <publicationStatus>
+        <statusType>published</statusType>
+        <date>
+          <ns2:year>""" + year + """</ns2:year>
+          <ns2:month>11</ns2:month>
+          <ns2:day>24</ns2:day>
+        </date>
+     </publicationStatus>
+    </publicationStatuses>
+    <language>en_US</language>""")
+    print("<title>\n\t<ns2:text lang='en' country='US'>" + title + "</ns2:text>\n</title>")
+    print("<abstract>\n\t<ns2:text lang='en' country='US'>" + abstract + "</ns2:text>\n</abstract>")
+    # TODO, integrate for loop to handle varying # of authors, author matching
+    # <persons>
+    #   <author>
+    #     <role>inventor</role>
+    #     <person origin="external">
+    #       <firstName>ExternalFirst</firstName>
+    #       <lastName>ExternalLast</lastName>
+    #     </person>
+    #   </author>
+	#   <author>
+    #     <role>inventor</role>
+    #     <person id="netID@illinois.edu">
+    #       <firstName>First</firstName>
+    #       <lastName>Last</lastName>
+    #     </person>
+    #   </author>
+    # </persons>
+    print("owner id=" + managing_unit + "/>")
+    print("<patentNumber>"+ patent_number + "</patentNumber>")
+    print("""<country>us</country>\n</patent>\n</publications>""")
+
+
 if __name__ == '__main__':
     # Set up infile and outfile names
     filename = '../path/of/your/file.csv'                              # Step 1

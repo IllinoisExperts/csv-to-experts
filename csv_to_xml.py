@@ -297,7 +297,8 @@ def validate_internal_authors(author_list: list, internal_persons: pd.DataFrame,
             idx_len = auth_dupes.index.tolist()
             if len(idx_len) > 1:
                 print("Warning! More than one UIUC faculty has the same name. Selecting the first author in list. You may want to fix this manually!")
-                auth_id = select_row["18 ID"].index[0]
+                auth_row_one = select_row.head(1)
+                auth_id = auth_row_one["18 ID"].item()
             else:
                 auth_id = select_row["18 ID"].item()
             auth_id = int(auth_id)

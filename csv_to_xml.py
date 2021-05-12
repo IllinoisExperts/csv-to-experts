@@ -292,7 +292,14 @@ def validate_internal_authors(author_list: list, internal_persons: pd.DataFrame,
         if len(ratios) == 1:
             # Look up ratios[0] in df, return the ID of that match using .loc
             select_row = internal_persons.loc[internal_persons["2 Last, first name"] == ratios[0][0]]
-            auth_id = select_row["18 ID"].item()
+            # TODO: Need to handle multiple authors with same name @ UIUC
+            auth_dupes = select_row.reset_index()
+            idx_len = auth_dupes.index.tolist()
+            if len(idx_len) > 1:
+                print("Warning! More than one UIUC faculty has the same name. Selecting the first author in list. You may want to fix this manually!")
+                auth_id = select_row["18 ID"].index[0]
+            else:
+                auth_id = select_row["18 ID"].item()
             auth_id = int(auth_id)
             unit_affiliation = select_row['unit'].item()
             matches_log.append((correct_string, ratios))

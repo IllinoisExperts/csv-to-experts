@@ -12,6 +12,7 @@ Supported publication types:
 ### Roadmap
 - Allow user input for certain global fields.
 - Fine tune the Internal Person matching. 
+- Bulk import patents data; see patents branch. 
 
 ### Known issues
 - "Contributor" field in dc metadata records is currently ignored.

@@ -1059,11 +1059,14 @@ def write_patents_xml(data, internal_persons: str, managing_unit: str, outfile_n
             for inventor in valid_authors:
                 print("""<author>
                             <role>inventor</role>""", file=outfile)
-                print("<person origin='" + "'>", file=outfile)
-                # TODO: Set origin="external" for external authors, id="netID@illinois.edu" for internal authors
-                #   e.g.  <person origin="external"> OR <person id="netID@illinois.edu">
-                print("<firstName>" + "</firstName>", file=outfile)
-                print("<lastName>" + "</lastName>", file=outfile)
+                # TODO: Attempting to access the ID from the inventor list returns an error. Fix!
+                inventor_id = str(inventor[0][0])
+                if "external" in inventor_id:
+                    print("<person origin='external'>", file=outfile)
+                else:
+                    print("<person origin='" + inventor[0] + "'>", file=outfile)
+                print("<firstName>" + inventor[1][0] + "</firstName>", file=outfile)
+                print("<lastName>" + inventor[1][1] +"</lastName>", file=outfile)
                 print("""</person>
                       </author>""", file=outfile)
             print("</persons>", file=outfile)

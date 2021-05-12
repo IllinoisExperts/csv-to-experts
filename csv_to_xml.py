@@ -299,10 +299,11 @@ def validate_internal_authors(author_list: list, internal_persons: pd.DataFrame,
                 print("Warning! More than one UIUC faculty has the same name. Selecting the first author in list. You may want to fix this manually!")
                 auth_row_one = select_row.head(1)
                 auth_id = auth_row_one["18 ID"].item()
+                unit_affiliation = auth_row_one['unit'].item()
             else:
                 auth_id = select_row["18 ID"].item()
+                unit_affiliation = select_row['unit'].item()
             auth_id = int(auth_id)
-            unit_affiliation = select_row['unit'].item()
             matches_log.append((correct_string, ratios))
         elif len(ratios) == 0:
             # Author not found in Internal Persons file - assign random ID

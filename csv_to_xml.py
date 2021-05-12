@@ -333,14 +333,14 @@ def validate_internal_authors(author_list: list, internal_persons: pd.DataFrame,
     return validated_authors, external_authors, matches_log
 
 
-def write_author(author_list: list) -> str:
+def write_authors(author_list: list) -> str:
     """
     Given authors and ID, insert into XML snippet, and return XML snippet.
 
     :param author_list: A list of lists: ID in position 0, tuple with 1+ authors in position 1 [[ID, ('First','Last')]]
     :return: XML snippet for authors
 
-    >>> write_author([[123, ('Angelina', 'Johnson'), 'Hogwarts'], [456, ('Gabrielle G.', 'Delacour'), 'Beauxbatons'], [789, ('Anthony', 'Goldstein'), np.nan]])     #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    >>> write_authors([[123, ('Angelina', 'Johnson'), 'Hogwarts'], [456, ('Gabrielle G.', 'Delacour'), 'Beauxbatons'], [789, ('Anthony', 'Goldstein'), np.nan]])     #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     <v1:author>
     ...
     </v1:author>
@@ -774,7 +774,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
         groups_to_print.extend(groupAuths)
         if authors[0][0] != '':
             valid_author, externals, matches = validate_internal_authors(authors, internal_persons_df, fuzzy_match_ratio)
-            print(write_author(valid_author), file=outfile)
+            print(write_authors(valid_author), file=outfile)
             external_persons.extend(list(externals))
             internal_matches.extend(matches)
         # Persons (group authors, organizational authors)
@@ -1014,53 +1014,55 @@ def write_patents_xml(data, internal_persons: str, managing_unit: str, outfile_n
     # Convert Excel file into dataframe for internal person matching
     internal_persons_df = access_internal_persons(internal_persons)
 
-    # DUMMY DATA
-    otm_id = "012"
-    patent_number = "123"
-    year = "2020"
-    title = "test"
-    abstract = "abstract"
-
     # FIRST DRAFT
     # Print the Pure XML namespaces above the loop through each research output.
     # NOTE: Download these namespaces from the Pure portal (Administrator > Bulk import). Link them to your XML before validating.
     print("""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <publications xmlns="v1.publication-import.base-uk.pure.atira.dk" xmlns:ns2="v3.commons.pure.atira.dk">""", file=outfile)
 
-    for patent in data:
-        print("<patent id='" + otm_id + "' subType='patent'>", file=outfile)
-        print("""<peerReviewed>false</peerReviewed>
-        <publicationStatuses>
-          <publicationStatus>
-            <statusType>published</statusType>
-            <date>
-              <ns2:year>""" + year + """</ns2:year>
-              <ns2:month>11</ns2:month>
-              <ns2:day>24</ns2:day>
-            </date>
-         </publicationStatus>
-        </publicationStatuses>
-        <language>en_US</language>""", file=outfile)
-        print("<title>\n\t<ns2:text lang='en' country='US'>" + title + "</ns2:text>\n</title>", file=outfile)
-        print("<abstract>\n\t<ns2:text lang='en' country='US'>" + abstract + "</ns2:text>\n</abstract>", file=outfile)
-        print("<persons>", file=outfile)
-        for person in ["list", "of", "persons"]:
-            # TODO, integrate for loop to handle varying # of authors, author matching
-            # authors, groupAuths = reformat_author(row['id'], row['creator']) # TODO: May not actually require this as the incoming data is already JSON, with first/lasts divided
-            # valid_author, externals, matches = validate_internal_authors(authors, internal_persons_df, fuzzy_match_ratio)
-            print("""<author>
-                        <role>inventor</role>""", file=outfile)
-            print("<person origin='" + "'>", file=outfile)
-            # TODO: Set origin="external" for external authors, id="netID@illinois.edu" for internal authors
-            #   e.g.  <person origin="external"> OR <person id="netID@illinois.edu">
-            print("<firstName>" + "</firstName>", file=outfile)
-            print("<lastName>" + "</lastName>", file=outfile)
-            print("""</person>
-                  </author>""", file=outfile)
-        print("</persons>", file=outfile)
-        print("<owner id='" + managing_unit + "' />", file=outfile)
-        print("<patentNumber>"+ patent_number + "</patentNumber>", file=outfile)
-        print("""<country>us</country>\n</patent>""", file=outfile)
+    for patent_number, patent_values in data.items():
+        if patent_values is not None:
+            year = patent_values[0]['patent_year']
+            month = patent_values[0]['patent_date'][5:7]
+            day = patent_values[0]['patent_date'][-2:]
+            print("<patent id='" + patent_number + "' subType='patent'>", file=outfile)
+            print("""<peerReviewed>false</peerReviewed>
+            <publicationStatuses>
+              <publicationStatus>
+                <statusType>published</statusType>
+                <date>
+                  <ns2:year>""" + year + """</ns2:year>""", file=outfile)
+            if len(patent_values[0]['patent_date']) > 4:
+                print("<ns2:month>"+ patent_values[0]['patent_date'][5:7] + "</ns2:month>", file=outfile)
+                print("<ns2:day>"+ patent_values[0]['patent_date'][-2:] + "</ns2:day>", file=outfile)
+            print("""</date>
+             </publicationStatus>
+            </publicationStatuses>
+            <language>en_US</language>""", file=outfile)
+            print("<title>\n\t<ns2:text lang='en' country='US'>" + patent_values[0]['patent_title'] + "</ns2:text>\n</title>", file=outfile)
+            print("<abstract>\n\t<ns2:text lang='en' country='US'>" + patent_values[0]['patent_abstract'] + "</ns2:text>\n</abstract>", file=outfile)
+            print("<persons>", file=outfile)
+            # Generate validated authors list
+            inventors_list = []
+            for inventor in patent_values[0]['inventors']:
+                inventors_list.append((inventor['inventor_first_name'], inventor['inventor_last_name']))
+            valid_authors, externals, matches = validate_internal_authors(inventors_list, internal_persons_df, fuzzy_match_ratio)
+            for inventor in valid_authors:
+                print("""<author>
+                            <role>inventor</role>""", file=outfile)
+                print("<person origin='" + "'>", file=outfile)
+                # TODO: Set origin="external" for external authors, id="netID@illinois.edu" for internal authors
+                #   e.g.  <person origin="external"> OR <person id="netID@illinois.edu">
+                print("<firstName>" + "</firstName>", file=outfile)
+                print("<lastName>" + "</lastName>", file=outfile)
+                print("""</person>
+                      </author>""", file=outfile)
+            print("</persons>", file=outfile)
+            print("<owner id='" + managing_unit + "' />", file=outfile)
+            print("<patentNumber>"+ patent_number + "</patentNumber>", file=outfile)
+            print("""<country>us</country>\n</patent>""", file=outfile)
+        else:
+            continue
     # outside of for loop
     print("</publications>", file=outfile)
 
@@ -1074,6 +1076,8 @@ if __name__ == '__main__':
     # Enter managing unit, organization name, and URL variables
     mgr_unit = "add here"                                               # Step 4
     org_name = "add here"                                               # Step 5
+    filename = "../find_patents/data/OTM_records_from_PatentsView.json"
+    researchers = "../ExpertsSCP/Pure persons - 11921.xls"
 
     # Select file type to process
     file_type = str(input('Enter a Z for Zotero file, D for DublinCore file, or P for patents data. '))

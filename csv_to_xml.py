@@ -992,7 +992,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
     return outfile
 
 
-def write_patents_xml(data, internal_persons: str, managing_unit: str, organization_name: str, outfile_name: str, fuzzy_match_ratio=79):
+def write_patents_xml(data, internal_persons: str, managing_unit: str, outfile_name: str, fuzzy_match_ratio=79):
     """
     Patents XML structure is quite different from others -
     Recommended to just keep this separate until you have a working draft,
@@ -1002,11 +1002,11 @@ def write_patents_xml(data, internal_persons: str, managing_unit: str, organizat
     Print data into an XML file, call helper functions depending on what columns are included in the data.
 
     :param data: List of dictionaries. Each dict contains 1 research output.
-    :param internal_persons: Str reference to Pure - Internal Persons file against which to validate the list of authors in csv_data.
+    :param internal_persons: Str reference to Pure - Internal Persons file against which to validate the list of authors in data.
     :param managing_unit: Value for the organizational owner can be found in Pure portal. Internal to Pure system.
-    :param organization_name: Appears as the research's affiliated unit on the portal.
     :param outfile_name: The name specified for the XML outfile.
     :param fuzzy_match_ratio: Optionally, change the fuzzy match ratio.
+    TODO: Possibly integrate the detailed output features to help with author disambiguation
     :return: None
     """
     # Prepare XML outfile
@@ -1027,44 +1027,40 @@ def write_patents_xml(data, internal_persons: str, managing_unit: str, organizat
     print("""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <publications xmlns="v1.publication-import.base-uk.pure.atira.dk" xmlns:ns2="v3.commons.pure.atira.dk">""", file=outfile)
 
-    # TODO: For loop - for patent in list of patents...
-    print("<patent id=" + otm_id + " subType='patent'>", file=outfile)
-    print("""
-    <peerReviewed>false</peerReviewed>
-    <publicationStatuses>
-      <publicationStatus>
-        <statusType>published</statusType>
-        <date>
-          <ns2:year>""" + year + """</ns2:year>
-          <ns2:month>11</ns2:month>
-          <ns2:day>24</ns2:day>
-        </date>
-     </publicationStatus>
-    </publicationStatuses>
-    <language>en_US</language>""", file=outfile)
-    print("<title>\n\t<ns2:text lang='en' country='US'>" + title + "</ns2:text>\n</title>", file=outfile)
-    print("<abstract>\n\t<ns2:text lang='en' country='US'>" + abstract + "</ns2:text>\n</abstract>", file=outfile)
-    # TODO, integrate for loop to handle varying # of authors, author matching
-    # <persons>
-    #   <author>
-    #     <role>inventor</role>
-    #     <person origin="external">
-    #       <firstName>ExternalFirst</firstName>
-    #       <lastName>ExternalLast</lastName>
-    #     </person>
-    #   </author>
-	#   <author>
-    #     <role>inventor</role>
-    #     <person id="netID@illinois.edu">
-    #       <firstName>First</firstName>
-    #       <lastName>Last</lastName>
-    #     </person>
-    #   </author>
-    # </persons>
-    print("owner id=" + managing_unit + "/>", file=outfile)
-    print("<patentNumber>"+ patent_number + "</patentNumber>", file=outfile)
-    print("""<country>us</country>\n</patent>\n""", file=outfile)
-
+    for patent in data:
+        print("<patent id='" + otm_id + "' subType='patent'>", file=outfile)
+        print("""<peerReviewed>false</peerReviewed>
+        <publicationStatuses>
+          <publicationStatus>
+            <statusType>published</statusType>
+            <date>
+              <ns2:year>""" + year + """</ns2:year>
+              <ns2:month>11</ns2:month>
+              <ns2:day>24</ns2:day>
+            </date>
+         </publicationStatus>
+        </publicationStatuses>
+        <language>en_US</language>""", file=outfile)
+        print("<title>\n\t<ns2:text lang='en' country='US'>" + title + "</ns2:text>\n</title>", file=outfile)
+        print("<abstract>\n\t<ns2:text lang='en' country='US'>" + abstract + "</ns2:text>\n</abstract>", file=outfile)
+        print("<persons>", file=outfile)
+        for person in ["list", "of", "persons"]:
+            # TODO, integrate for loop to handle varying # of authors, author matching
+            # authors, groupAuths = reformat_author(row['id'], row['creator']) # TODO: May not actually require this as the incoming data is already JSON, with first/lasts divided
+            # valid_author, externals, matches = validate_internal_authors(authors, internal_persons_df, fuzzy_match_ratio)
+            print("""<author>
+                        <role>inventor</role>""", file=outfile)
+            print("<person origin='" + "'>", file=outfile)
+            # TODO: Set origin="external" for external authors, id="netID@illinois.edu" for internal authors
+            #   e.g.  <person origin="external"> OR <person id="netID@illinois.edu">
+            print("<firstName>" + "</firstName>", file=outfile)
+            print("<lastName>" + "</lastName>", file=outfile)
+            print("""</person>
+                  </author>""", file=outfile)
+        print("</persons>", file=outfile)
+        print("<owner id='" + managing_unit + "' />", file=outfile)
+        print("<patentNumber>"+ patent_number + "</patentNumber>", file=outfile)
+        print("""<country>us</country>\n</patent>""", file=outfile)
     # outside of for loop
     print("</publications>", file=outfile)
 
@@ -1073,6 +1069,11 @@ if __name__ == '__main__':
     # Set up infile and outfile names
     filename = '../path/of/your/file.csv'                              # Step 1
     outfile = "choose_a_name.xml"                                      # Step 2
+    # Load the names and IDs from Pure of internal Pure persons
+    researchers = "../path/of/Pure_exported/excel_file.xls"             # Step 3
+    # Enter managing unit, organization name, and URL variables
+    mgr_unit = "add here"                                               # Step 4
+    org_name = "add here"                                               # Step 5
 
     # Select file type to process
     file_type = str(input('Enter a Z for Zotero file, D for DublinCore file, or P for patents data. '))
@@ -1080,23 +1081,22 @@ if __name__ == '__main__':
         # Load the Zotero CSV file
         print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_zotero_csv(filename)
+        # Print the XML
+        outgoing_xml = write_xml \
+            (incoming_metadata, researchers, mgr_unit, org_name, outfile, 80, detailed_output=True)  # Steps 6 and 7
     elif file_type.lower().strip() in ['d', 'dublincore', 'dublin core']:
         # Load the templated CSV file
         print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_preformatted_csv(filename)
+        # Print the XML
+        outgoing_xml = write_xml \
+            (incoming_metadata, researchers, mgr_unit, org_name, outfile, 80, detailed_output=True)  # Steps 6 and 7
     elif file_type.lower().strip() in ['p', 'patent']:
         print('\nNow processing: ' + filename + '...\n')
         incoming_metadata = load_patents(filename)
+        # Print the XML
+        outgoing_xml = write_patents_xml(incoming_metadata, researchers, mgr_unit, outfile, 80)
     else:
         raise ValueError('Invalid input.')
-
-    # Load the names and IDs from Pure of internal Pure persons
-    researchers = "../path/of/Pure_exported/excel_file.xls"             # Step 3
-    # Enter managing unit, organization name, and URL variables
-    mgr_unit = "add here"                                               # Step 4
-    org_name = "add here"                                               # Step 5
-
-    # Print the XML
-    outgoing_xml = write_xml\
-        (incoming_metadata, researchers, mgr_unit, org_name, outfile, 80, detailed_output=True)     # Steps 6 and 7
+    # Print confirmation message
     print("\nOutfile saved as: {}".format(outfile))

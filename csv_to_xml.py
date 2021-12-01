@@ -100,11 +100,30 @@ def load_zotero_csv(csv_file: str) -> list:
 
 def load_patents(json_file: str) -> list:
     """
-    TODO: Accept a JSON file of patents data, reshape to match expected data structure
+    Accept a JSON file of patents data, reshape to match expected data structure
+    Infile data structure: List of dictionaries of lists
+    [{'PATENT#':
+        [{'patent_title': 'TITLE HERE',
+        'patent_date': 'YYYY-MM-DD',
+        'patent_year': 'YYYY',
+        'patent_abstract': 'ABSTRACT HERE',
+        'inventors':
+            [{'inventor_id': 'fl:m_ln:name-25',
+            'inventor_first_name': 'FIRST',
+            'inventor_last_name': 'LAST',
+            'inventor_key_id': '12356'},...],
+            'applications':
+                [{'app_date': '2008-01-14',
+                  'app_id': '12/008796'}]
+        }]
+    }]
 
     :param json_file: A JSON file returned from find_patents module
-    :return: A list of dictionaries, where each row of data is a dictionary containing header:value pairs
+    :return: dict of lists with 1 item (dict) e.g. [{'patent_title':'TITLE HERE','patent_date':'YYYY-MM-DD','patent_year':'YYYY','patent_abstract':'ABSTRACT','inventors':[],'applications':[]}]
     """
+    df = pd.read_json(json_file, orient='index')
+    allrows = df['patents'].to_dict()
+    return allrows
 
 
 def compare_records(old_records, xml_infile_name, new_xml_outfile_name):
@@ -323,14 +342,14 @@ def validate_internal_authors(author_list: list, internal_persons: pd.DataFrame,
     return validated_authors, external_authors, matches_log
 
 
-def write_author(author_list: list) -> str:
+def write_authors(author_list: list) -> str:
     """
     Given authors and ID, insert into XML snippet, and return XML snippet.
 
     :param author_list: A list of lists: ID in position 0, tuple with 1+ authors in position 1 [[ID, ('First','Last')]]
     :return: XML snippet for authors
 
-    >>> write_author([[123, ('Angelina', 'Johnson'), 'Hogwarts'], [456, ('Gabrielle G.', 'Delacour'), 'Beauxbatons'], [789, ('Anthony', 'Goldstein'), np.nan]])     #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    >>> write_authors([[123, ('Angelina', 'Johnson'), 'Hogwarts'], [456, ('Gabrielle G.', 'Delacour'), 'Beauxbatons'], [789, ('Anthony', 'Goldstein'), np.nan]])     #doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     <v1:author>
     ...
     </v1:author>
@@ -764,7 +783,7 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
         groups_to_print.extend(groupAuths)
         if authors[0][0] != '':
             valid_author, externals, matches = validate_internal_authors(authors, internal_persons_df, fuzzy_match_ratio)
-            print(write_author(valid_author), file=outfile)
+            print(write_authors(valid_author), file=outfile)
             external_persons.extend(list(externals))
             internal_matches.extend(matches)
         # Persons (group authors, organizational authors)
@@ -982,34 +1001,118 @@ def write_xml(csv_data: list, internal_persons: str, managing_unit: str, organiz
     return outfile
 
 
+def write_patents_xml(data, internal_persons: str, managing_unit: str, outfile_name: str, fuzzy_match_ratio=79):
+    """
+    Patents XML structure is quite different from others -
+    Recommended to just keep this separate until you have a working draft,
+    Then potentially integrate them.
+
+    Given JSON data and the filename you want,
+    Print data into an XML file, call helper functions depending on what columns are included in the data.
+
+    :param data: List of dictionaries. Each dict contains 1 research output.
+    :param internal_persons: Str reference to Pure - Internal Persons file against which to validate the list of authors in data.
+    :param managing_unit: Value for the organizational owner can be found in Pure portal. Internal to Pure system.
+    :param outfile_name: The name specified for the XML outfile.
+    :param fuzzy_match_ratio: Optionally, change the fuzzy match ratio.
+    TODO: Possibly integrate the detailed output features to help with author disambiguation
+    :return: None
+    """
+    # Prepare XML outfile
+    outfile = open(outfile_name, "w", encoding='utf-8')
+    # Convert Excel file into dataframe for internal person matching
+    internal_persons_df = access_internal_persons(internal_persons)
+
+    # FIRST DRAFT
+    # Print the Pure XML namespaces above the loop through each research output.
+    # NOTE: Download these namespaces from the Pure portal (Administrator > Bulk import). Link them to your XML before validating.
+    print("""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<publications xmlns="v1.publication-import.base-uk.pure.atira.dk" xmlns:ns2="v3.commons.pure.atira.dk">""", file=outfile)
+
+    for patent_number, patent_values in data.items():
+        if patent_values is not None:
+            year = patent_values[0]['patent_year']
+            month = patent_values[0]['patent_date'][5:7]
+            day = patent_values[0]['patent_date'][-2:]
+            print("<patent id='" + patent_number + "' subType='patent'>", file=outfile)
+            print("""<peerReviewed>false</peerReviewed>
+            <publicationStatuses>
+              <publicationStatus>
+                <statusType>published</statusType>
+                <date>
+                  <ns2:year>""" + year + """</ns2:year>""", file=outfile)
+            if len(patent_values[0]['patent_date']) > 4:
+                print("<ns2:month>"+ patent_values[0]['patent_date'][5:7] + "</ns2:month>", file=outfile)
+                print("<ns2:day>"+ patent_values[0]['patent_date'][-2:] + "</ns2:day>", file=outfile)
+            print("""</date>
+             </publicationStatus>
+            </publicationStatuses>
+            <language>en_US</language>""", file=outfile)
+            print("<title>\n\t<ns2:text lang='en' country='US'>" + patent_values[0]['patent_title'] + "</ns2:text>\n</title>", file=outfile)
+            print("<abstract>\n\t<ns2:text lang='en' country='US'>" + patent_values[0]['patent_abstract'] + "</ns2:text>\n</abstract>", file=outfile)
+            print("<persons>", file=outfile)
+            # Generate validated authors list
+            inventors_list = []
+            for inventor in patent_values[0]['inventors']:
+                inventors_list.append((inventor['inventor_first_name'], inventor['inventor_last_name']))
+            valid_authors, externals, matches = validate_internal_authors(inventors_list, internal_persons_df, fuzzy_match_ratio)
+            for inventor in valid_authors:
+                print("""<author>
+                            <role>inventor</role>""", file=outfile)
+                # TODO: Attempting to access the ID from the inventor list returns an error. Fix!
+                inventor_id = str(inventor[0][0])
+                if "external" in inventor_id:
+                    print("<person origin='external'>", file=outfile)
+                else:
+                    print("<person origin='" + inventor[0] + "'>", file=outfile)
+                print("<firstName>" + inventor[1][0] + "</firstName>", file=outfile)
+                print("<lastName>" + inventor[1][1] +"</lastName>", file=outfile)
+                print("""</person>
+                      </author>""", file=outfile)
+            print("</persons>", file=outfile)
+            print("<owner id='" + managing_unit + "' />", file=outfile)
+            print("<patentNumber>"+ patent_number + "</patentNumber>", file=outfile)
+            print("""<country>us</country>\n</patent>""", file=outfile)
+        else:
+            continue
+    # outside of for loop
+    print("</publications>", file=outfile)
+
+
 if __name__ == '__main__':
     # Set up infile and outfile names
     filename = '../path/of/your/file.csv'                              # Step 1
     outfile = "choose_a_name.xml"                                      # Step 2
-
-    # Select file type to process
-    file_type = str(input('Enter a Z for Zotero file or D for DublinCore file. '))
-    if file_type.lower().strip() in ['z', 'zotero']:
-        # Load the Zotero CSV file
-        print('\nNow processing: ' + filename + '...\n')
-        incoming_metadata = load_zotero_csv(filename)
-    elif file_type.lower().strip() in ['d', 'dublincore', 'dublin core']:
-        # Load the templated CSV file
-        print('\nNow processing: ' + filename + '...\n')
-        incoming_metadata = load_preformatted_csv(filename)
-    elif file_type.lower().strip() in ['p', 'patent']:
-        print('\nNow processing: ' + filename + '...\n')
-        incoming_metadata = load_patents(filename)
-    else:
-        raise ValueError('Invalid input.')
-
     # Load the names and IDs from Pure of internal Pure persons
     researchers = "../path/of/Pure_exported/excel_file.xls"             # Step 3
     # Enter managing unit, organization name, and URL variables
     mgr_unit = "add here"                                               # Step 4
     org_name = "add here"                                               # Step 5
+    filename = "../find_patents/data/OTM_records_from_PatentsView.json"
+    researchers = "../ExpertsSCP/Pure persons - 11921.xls"
 
-    # Print the XML
-    outgoing_xml = write_xml\
-        (incoming_metadata, researchers, mgr_unit, org_name, outfile, 80, detailed_output=True)     # Steps 6 and 7
+    # Select file type to process
+    file_type = str(input('Enter a Z for Zotero file, D for DublinCore file, or P for patents data. '))
+    if file_type.lower().strip() in ['z', 'zotero']:
+        # Load the Zotero CSV file
+        print('\nNow processing: ' + filename + '...\n')
+        incoming_metadata = load_zotero_csv(filename)
+        # Print the XML
+        outgoing_xml = write_xml \
+            (incoming_metadata, researchers, mgr_unit, org_name, outfile, 80, detailed_output=True)  # Steps 6 and 7
+    elif file_type.lower().strip() in ['d', 'dublincore', 'dublin core']:
+        # Load the templated CSV file
+        print('\nNow processing: ' + filename + '...\n')
+        incoming_metadata = load_preformatted_csv(filename)
+        # Print the XML
+        outgoing_xml = write_xml \
+            (incoming_metadata, researchers, mgr_unit, org_name, outfile, 80, detailed_output=True)  # Steps 6 and 7
+    elif file_type.lower().strip() in ['p', 'patent']:
+        print('\nNow processing: ' + filename + '...\n')
+        incoming_metadata = load_patents(filename)
+        # Print the XML
+        outgoing_xml = write_patents_xml(incoming_metadata, researchers, mgr_unit, outfile, 80)
+    else:
+        raise ValueError('Invalid input.')
+    # Print confirmation message
     print("\nOutfile saved as: {}".format(outfile))

@@ -1,4 +1,4 @@
-# 113 duplicate journal articles of like 205
+# only works for research output with dois (designed for journal articles)
 from api_keys import production_key
 from api_keys import staging_key
 import process_metadata as pm
